@@ -122,9 +122,14 @@ if app.config["SECRET_KEY"] == _default_secret:
         "unique et secrète avant tout déploiement en production."
     )
 
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
-    "DATABASE_URL", f"sqlite:///{os.path.join(BASE_DIR, 'menuflash.db')}"
-).replace("postgres://", "postgresql://", 1)
+_db_url = os.environ.get("DATABASE_URL", f"sqlite:///{os.path.join(BASE_DIR, 'menuflash.db')}")
+# Force le pilote psycopg2, quelle que soit la forme de l'adresse fournie
+# (postgres://, postgresql:// ou postgresql+psycopg2://).
+if _db_url.startswith("postgres://"):
+    _db_url = _db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+elif _db_url.startswith("postgresql://"):
+    _db_url = _db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+app.config["SQLALCHEMY_DATABASE_URI"] = _db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 
