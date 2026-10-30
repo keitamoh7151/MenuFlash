@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{{ restaurant.name }} — Détail{% endblock %}
+{% block content %}
+<nav class="navbar navbar-expand-lg mf-navbar sticky-top">
+  <div class="container-fluid px-3 px-md-4">
+    <span class="navbar-brand d-flex align-items-center gap-2 mb-0">
+      <i class="bi bi-qr-code-scan"></i> MenuFlash<span class="mf-brand-mini">Mini</span> <span class="text-secondary fw-normal small">· {{ restaurant.name }}</span>
+    </span>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('super_admin_dashboard') }}"><i class="bi bi-arrow-left me-1"></i>Retour au panel</a>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('public_menu', slug=restaurant.slug) }}">Voir le menu</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-4" style="max-width: 1040px;">
+  <div class="card mf-section-card mb-4">
+    <div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-3">Informations</h2>
+      <p class="mb-1"><strong>Slug :</strong> /m/{{ restaurant.slug }}</p>
+      <p class="mb-1"><strong>Plan :</strong> {{ restaurant.subscription_plan }}</p>
+      <p class="mb-1"><strong>Thème du menu public :</strong> {{ restaurant.theme_colors.label }}</p>
+      <p class="mb-1"><strong>Abonnement valide jusqu'au :</strong>
+        {{ restaurant.subscription_active_until.strftime('%d/%m/%Y') if restaurant.subscription_active_until else "—" }}
+      </p>
+      <p class="mb-0"><strong>Statut compte :</strong>
+        {% if restaurant.is_active %}
+          <span class="badge" style="background:#E2F3EA; color: #2E7D5B;">Actif</span>
+        {% else %}
+          <span class="badge" style="background:#F8E0DD; color: #C4453A;">Désactivé</span>
+        {% endif %}
+      </p>
+    </div>
+  </div>
+
+  <div class="card mf-section-card">
+    <div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-3">Historique des paiements</h2>
+      {% if payments %}
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead class="small text-secondary text-uppercase">
+              <tr><th>Date</th><th>Montant</th><th>Méthode</th><th>Référence</th><th>Mois ajoutés</th></tr>
+            </thead>
+            <tbody>
+              {% for p in payments %}
+                <tr>
+                  <td>{{ p.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                  <td class="fw-bold" style="color: var(--mf-accent-dark);">{{ p.amount }} FCFA</td>
+                  <td>{{ p.method }}</td>
+                  <td>{{ p.reference or "—" }}</td>
+                  <td>{{ p.months_added }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-secondary small mb-0">Aucun paiement enregistré pour l'instant.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

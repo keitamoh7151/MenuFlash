@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Connexion — MenuFlash Mini{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card p-2">
+    <div class="card-body p-4">
+      <div class="text-center mb-4">
+        <a href="{{ url_for('landing') }}" class="text-decoration-none">
+          <i class="bi bi-qr-code-scan" style="font-size: 1.8rem; color: var(--mf-accent);"></i>
+          <h1 class="h5 fw-bold mt-2 mb-0" style="color: var(--mf-ink);">
+            MenuFlash<span class="mf-brand-mini">Mini</span>
+          </h1>
+        </a>
+      </div>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-floating mb-3">
+          <input type="email" class="form-control" id="email" name="email" placeholder="vous@restaurant.com" required>
+          <label for="email">Adresse email</label>
+        </div>
+        <div class="form-floating mb-2">
+          <input type="password" class="form-control" id="password" name="password" placeholder="Mot de passe" required>
+          <label for="password">Mot de passe</label>
+        </div>
+        <div class="text-end mb-3">
+          <a href="{{ url_for('forgot_password') }}" class="small">Mot de passe oublié ?</a>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 py-2">Se connecter</button>
+      </form>
+      <p class="text-center text-secondary small mt-3 mb-0">
+        Pas encore de compte ? <a href="{{ url_for('signup') }}">Démarrer l'essai gratuit</a>
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

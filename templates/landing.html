@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>MenuFlash Mini — Menu QR code, commandes et cuisine en temps réel pour restaurants</title>
+  <meta name="description" content="MenuFlash Mini transforme votre menu papier en menu QR code interactif : commande en ligne, notifications cuisine instantanées, statistiques de ventes. Essai gratuit de 7 jours.">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='landing.css') }}">
+</head>
+<body class="mf-landing-body">
+
+  <nav class="mf-landing-nav">
+    <div class="container d-flex align-items-center justify-content-between py-3">
+      <a href="{{ url_for('landing') }}" class="mf-landing-brand">
+        <i class="bi bi-qr-code-scan"></i> MenuFlash <span>Mini</span>
+      </a>
+      <div class="d-flex align-items-center gap-2">
+        <a href="{{ url_for('admin_login') }}" class="btn btn-outline-light btn-sm d-none d-sm-inline-flex">Se connecter</a>
+        <a href="{{ url_for('signup') }}" class="btn btn-primary btn-sm">Essai gratuit</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="mf-landing-hero">
+    <div class="container">
+      <div class="row align-items-center g-5">
+        <div class="col-lg-6">
+          <span class="mf-landing-kicker"><i class="bi bi-stars me-1"></i>Pour restaurants, cafés &amp; maquis</span>
+          <h1 class="mf-landing-h1">Votre menu papier devient <span class="mf-landing-highlight">un menu intelligent</span></h1>
+          <p class="mf-landing-lead">
+            Vos clients scannent, commandent et suivent leur commande en direct. Votre cuisine reçoit chaque
+            commande instantanément, avec notification sonore. Vous gérez tout depuis un tableau de bord simple —
+            et pouvez gérer plusieurs établissements depuis un seul compte.
+          </p>
+          <div class="d-flex flex-wrap gap-3 mt-4">
+            <a href="{{ url_for('signup') }}" class="btn btn-primary btn-lg px-4">
+              <i class="bi bi-rocket-takeoff me-1"></i> Démarrer gratuitement
+            </a>
+            <a href="#fonctionnalites" class="btn btn-outline-light btn-lg px-4">Découvrir les fonctionnalités</a>
+          </div>
+          <p class="mf-landing-subnote mt-3">
+            <i class="bi bi-check-circle-fill me-1"></i>7 jours d'essai gratuit
+            <i class="bi bi-check-circle-fill ms-3 me-1"></i>Aucune carte bancaire requise
+            <i class="bi bi-check-circle-fill ms-3 me-1"></i>Prêt en moins de 10 minutes
+          </p>
+        </div>
+        <div class="col-lg-6">
+          <div class="mf-phone-mock-wrap">
+            <div class="mf-phone-mock">
+              <div class="mf-phone-notch"></div>
+              <div class="mf-phone-screen">
+                <div class="mf-phone-header">
+                  <div class="mf-phone-lang"><i class="bi bi-translate"></i> FR</div>
+                  <div class="mf-phone-title">Chez Awa</div>
+                  <div class="mf-phone-sub">Choisissez vos plats et envoyez votre commande</div>
+                </div>
+                <div class="mf-phone-item">
+                  <div class="mf-phone-item-thumb"><i class="bi bi-egg-fried"></i></div>
+                  <div class="mf-phone-item-info">
+                    <strong>Riz au gras</strong>
+                    <span>2 500 FCFA · ~20 min</span>
+                  </div>
+                  <div class="mf-phone-item-qty">2</div>
+                </div>
+                <div class="mf-phone-item">
+                  <div class="mf-phone-item-thumb"><i class="bi bi-cup-straw"></i></div>
+                  <div class="mf-phone-item-info">
+                    <strong>Bissap</strong>
+                    <span>500 FCFA · ~2 min</span>
+                  </div>
+                  <div class="mf-phone-item-qty">1</div>
+                </div>
+                <div class="mf-phone-cart">
+                  <span>3 articles · 5 500 FCFA</span>
+                  <span class="mf-phone-cart-btn">Voir ma commande →</span>
+                </div>
+              </div>
+            </div>
+            <div class="mf-phone-float-badge mf-phone-float-badge-1">
+              <i class="bi bi-bell-fill"></i> Nouvelle commande reçue !
+            </div>
+            <div class="mf-phone-float-badge mf-phone-float-badge-2">
+              <i class="bi bi-star-fill"></i> 4.8 · 126 avis
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="mf-landing-trustbar">
+    <div class="container d-flex flex-wrap justify-content-center gap-4 gap-md-5 text-center">
+      <div><i class="bi bi-lightning-charge-fill"></i> Commandes en temps réel</div>
+      <div><i class="bi bi-translate"></i> Interface FR / EN</div>
+      <div><i class="bi bi-shop"></i> Multi-restaurant</div>
+      <div><i class="bi bi-graph-up-arrow"></i> Statistiques intégrées</div>
+      <div><i class="bi bi-shield-lock-fill"></i> Sécurité renforcée</div>
+    </div>
+  </section>
+
+  <section class="mf-landing-section" id="fonctionnalites">
+    <div class="container">
+      <div class="text-center mb-5">
+        <span class="mf-landing-eyebrow">Fonctionnalités</span>
+        <h2 class="mf-landing-h2">Tout ce qu'il faut pour digitaliser votre service</h2>
+        <p class="mf-landing-section-lead">Pensé pour les restaurants, cafés et maquis qui veulent un outil simple, rapide, et qui fonctionne vraiment.</p>
+      </div>
+
+      <div class="row g-4">
+        <div class="col-md-6 col-lg-4">
+          <div class="mf-feature-card">
+            <div class="mf-feature-icon"><i class="bi bi-qr-code"></i></div>
+            <h3>Menu QR code</h3>
+            <p>Vos clients scannent un code à table et voient votre menu complet, avec photos, prix et temps de préparation — sans application à installer.</p>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="mf-feature-card">
+            <div class="mf-feature-icon"><i class="bi bi-bell-fill"></i></div>
+            <h3>Notifications cuisine instantanées</h3>
+            <p>Chaque commande arrive en direct sur l'écran de la cuisine, avec un son d'alerte — sans recharger la page, sans rien manquer.</p>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="mf-feature-card">
+            <div class="mf-feature-icon"><i class="bi bi-tags-fill"></i></div>
+            <h3>Vente additionnelle</h3>
+            <p>Associez un accompagnement ou une boisson à vos plats phares : vos clients les voient suggérés automatiquement avant d'envoyer leur commande.</p>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="mf-feature-card">
+            <div class="mf-feature-icon"><i class="bi bi-shop"></i></div>
+            <h3>Mode multi-restaurant</h3>
+            <p>Gérez plusieurs établissements depuis un seul compte, avec un sélecteur pour basculer instantanément de l'un à l'autre.</p>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="mf-feature-card">
+            <div class="mf-feature-icon"><i class="bi bi-image-fill"></i></div>
+            <h3>Votre marque, pas la nôtre</h3>
+            <p>Ajoutez le logo de votre restaurant : il remplace l'identité MenuFlash sur votre tableau de bord et votre menu public.</p>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="mf-feature-card">
+            <div class="mf-feature-icon"><i class="bi bi-graph-up-arrow"></i></div>
+            <h3>Statistiques de ventes</h3>
+            <p>Chiffre d'affaires du jour, de la semaine, du mois, plats les plus vendus et heures de pointe — sans tableur à remplir.</p>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="mf-feature-card">
+            <div class="mf-feature-icon"><i class="bi bi-people-fill"></i></div>
+            <h3>Équipe à accès limité</h3>
+            <p>Créez des comptes cuisinier avec un accès restreint à la seule page Commandes — ils voient et gèrent, sans toucher au reste.</p>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="mf-feature-card">
+            <div class="mf-feature-icon"><i class="bi bi-star-fill"></i></div>
+            <h3>Avis clients par plat</h3>
+            <p>Vos clients notent chaque plat après le service ; les moyennes s'affichent directement sur votre menu public.</p>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="mf-feature-card">
+            <div class="mf-feature-icon"><i class="bi bi-shield-lock-fill"></i></div>
+            <h3>Sécurité intégrée</h3>
+            <p>Mots de passe chiffrés, verrouillage de compte, vérification d'email, protection contre les attaques par force brute et les falsifications de requêtes.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="mf-landing-section mf-landing-section-alt">
+    <div class="container">
+      <div class="text-center mb-5">
+        <span class="mf-landing-eyebrow">Comment ça marche</span>
+        <h2 class="mf-landing-h2">Prêt en trois étapes</h2>
+      </div>
+      <div class="row g-4">
+        <div class="col-md-4">
+          <div class="mf-step-card">
+            <div class="mf-step-num">1</div>
+            <h3>Créez votre compte</h3>
+            <p>Renseignez le nom de votre restaurant, votre email et un mot de passe. Votre espace est prêt immédiatement.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="mf-step-card">
+            <div class="mf-step-num">2</div>
+            <h3>Ajoutez votre menu et votre logo</h3>
+            <p>Créez vos catégories et vos plats, et téléversez le logo de votre restaurant — votre tableau de bord devient le vôtre.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="mf-step-card">
+            <div class="mf-step-num">3</div>
+            <h3>Imprimez vos QR codes</h3>
+            <p>Téléchargez un chevalet de table prêt à imprimer pour chaque table, et recevez vos premières commandes.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="mf-landing-cta">
+    <div class="container text-center">
+      <h2 class="mf-landing-h2 text-white">Essayez gratuitement pendant 7 jours</h2>
+      <p class="mf-landing-section-lead text-white-50 mb-4">
+        Aucune carte bancaire requise. Créez votre menu, testez les commandes, et décidez ensuite.
+      </p>
+      <a href="{{ url_for('signup') }}" class="btn btn-primary btn-lg px-5">
+        <i class="bi bi-rocket-takeoff me-1"></i> Créer mon compte gratuitement
+      </a>
+    </div>
+  </section>
+
+  <footer class="mf-landing-footer">
+    <div class="container d-flex flex-wrap justify-content-between align-items-center gap-3 py-4">
+      <div class="mf-landing-brand mf-landing-brand-footer">
+        <i class="bi bi-qr-code-scan"></i> MenuFlash <span>Mini</span>
+      </div>
+      <div class="d-flex gap-3 small text-secondary">
+        <a href="{{ url_for('admin_login') }}" class="text-secondary">Se connecter</a>
+        <a href="{{ url_for('signup') }}" class="text-secondary">Créer un compte</a>
+      </div>
+      <div class="small text-secondary">&copy; {{ now_year }} MenuFlash Mini</div>
+    </div>
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Super-admin — MenuFlash Mini{% endblock %}
+{% block content %}
+<nav class="navbar navbar-expand-lg mf-navbar sticky-top">
+  <div class="container-fluid px-3 px-md-4">
+    <span class="navbar-brand d-flex align-items-center gap-2 mb-0">
+      <i class="bi bi-qr-code-scan"></i> MenuFlash<span class="mf-brand-mini">Mini</span> <span class="text-secondary fw-normal small">· Panel super-admin</span>
+    </span>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('super_admin_security_log') }}">
+        <i class="bi bi-shield-lock me-1"></i>Journal de sécurité
+      </a>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('change_password') }}">
+        <i class="bi bi-key me-1"></i>Mot de passe
+      </a>
+      <a class="btn btn-link btn-sm text-secondary" href="{{ url_for('admin_logout') }}">Déconnexion</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-4" style="max-width: 1040px;">
+  <div class="alert alert-light border small mb-4">
+    <i class="bi bi-info-circle-fill me-1" style="color: var(--mf-accent);"></i>
+    Les restaurateurs peuvent désormais créer eux-mêmes leur compte via la page d'inscription en libre-service,
+    et gérer plusieurs établissements depuis un seul compte via le sélecteur de leur tableau de bord.
+    Ce formulaire reste utile pour créer un compte manuellement en leur nom, si besoin.
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="card mf-stat-card text-center p-3">
+        <div class="mf-stat-num">{{ total }}</div>
+        <div class="small text-secondary text-uppercase">Restaurants</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card mf-stat-card text-center p-3">
+        <div class="mf-stat-num" style="color: #2E7D5B;">{{ actifs }}</div>
+        <div class="small text-secondary text-uppercase">Actifs</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card mf-stat-card text-center p-3">
+        <div class="mf-stat-num" style="color: #B8860B;">{{ expires_bientot }}</div>
+        <div class="small text-secondary text-uppercase">Expirent ≤ 5j</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card mf-stat-card text-center p-3">
+        <div class="mf-stat-num" style="color: #C4453A;">{{ expires }}</div>
+        <div class="small text-secondary text-uppercase">Expirés</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mf-section-card mb-4">
+    <div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-3">Créer un nouveau restaurant client (manuellement)</h2>
+      <form method="post" action="{{ url_for('super_admin_create_restaurant') }}" class="row g-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3"><input type="text" name="name" class="form-control" maxlength="120" placeholder="Nom du restaurant" required></div>
+        <div class="col-md-3"><input type="text" name="slug" class="form-control" maxlength="80" placeholder="slug-url (ex: chez-awa)"></div>
+        <div class="col-md-3"><input type="email" name="owner_email" class="form-control" maxlength="120" placeholder="Email du gestionnaire" required></div>
+        <div class="col-md-2"><input type="password" name="owner_password" class="form-control" placeholder="Mot de passe (8 car. min)" minlength="8" required></div>
+        <div class="col-md-1"><button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus-lg"></i></button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card mf-section-card">
+    <div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-3">Restaurants clients</h2>
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead class="small text-secondary text-uppercase">
+            <tr><th>Restaurant</th><th>Statut</th><th>Expire le</th><th>Plan</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for r in restaurants %}
+              <tr>
+                <td>
+                  <a href="{{ url_for('super_admin_restaurant_detail', restaurant_id=r.id) }}"><strong>{{ r.name }}</strong></a>
+                  <div class="small text-secondary">/m/{{ r.slug }}</div>
+                </td>
+                <td>
+                  {% if not r.is_active %}
+                    <span class="badge" style="background:#F8E0DD; color: #C4453A;">Désactivé</span>
+                  {% elif r.is_subscription_valid %}
+                    {% if r.days_remaining <= 5 %}
+                      <span class="badge" style="background:#F7EDD2; color: #B8860B;">Actif ({{ r.days_remaining }}j)</span>
+                    {% else %}
+                      <span class="badge" style="background:#E2F3EA; color: #2E7D5B;">Actif</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="badge" style="background:#F8E0DD; color: #C4453A;">Expiré</span>
+                  {% endif %}
+                </td>
+                <td>{{ r.subscription_active_until.strftime('%d/%m/%Y') if r.subscription_active_until else "—" }}</td>
+                <td>{{ r.subscription_plan }}</td>
+                <td class="text-end">
+                  <button type="button" class="btn btn-sm btn-primary"
+                          data-bs-toggle="modal" data-bs-target="#payment-modal"
+                          data-action-url="{{ url_for('super_admin_record_payment', restaurant_id=r.id) }}"
+                          data-restaurant-name="{{ r.name }}">
+                    <i class="bi bi-cash-coin me-1"></i>Paiement
+                  </button>
+                  <form method="post" action="{{ url_for('super_admin_toggle_restaurant', restaurant_id=r.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-outline-secondary">{{ "Désactiver" if r.is_active else "Réactiver" }}</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="payment-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form method="post" id="payment-modal-form" class="modal-content">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header border-0">
+        <h5 class="modal-title">Paiement — <span id="payment-modal-restaurant-name"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2">
+          <div class="col-6"><label class="form-label small">Montant (FCFA)</label><input type="number" name="amount" class="form-control" required></div>
+          <div class="col-6">
+            <label class="form-label small">Méthode</label>
+            <select name="method" class="form-select">
+              <option>Wave</option><option>Orange Money</option><option>Moov Money</option><option>Espèces</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small">Durée</label>
+            <select name="months" class="form-select">
+              <option value="1">1 mois</option><option value="3">3 mois</option><option value="12">12 mois</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small">Plan</label>
+            <select name="plan" class="form-select">
+              <option value="basic">Basic</option><option value="pro">Pro</option>
+            </select>
+          </div>
+          <div class="col-12"><label class="form-label small">Référence (optionnel)</label><input type="text" name="reference" class="form-control" placeholder="ID transaction Mobile Money"></div>
+        </div>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary">Valider le paiement</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

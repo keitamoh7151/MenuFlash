@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+{% block title %}Menu — {{ restaurant.name }}{% endblock %}
+{% block content %}
+{% include "_admin_navbar.html" %}
+
+<div class="container py-4" style="max-width: 1040px;">
+  {% if not restaurant.is_subscription_valid %}
+    <div class="alert alert-danger d-flex align-items-center gap-2 mf-animate-in">
+      <i class="bi bi-exclamation-octagon-fill"></i>
+      Votre abonnement a expiré. Votre menu n'est plus visible par vos clients.
+    </div>
+  {% elif restaurant.days_remaining <= 5 %}
+    <div class="alert alert-warning d-flex align-items-center gap-2 mf-animate-in">
+      <i class="bi bi-clock-history"></i>
+      Votre abonnement expire dans {{ restaurant.days_remaining }} jour(s).
+    </div>
+  {% endif %}
+
+  {% if active_orders_count %}
+    <div class="alert d-flex align-items-center gap-2 mf-animate-in" style="background: var(--mf-accent-light); color: var(--mf-accent-dark);">
+      <i class="bi bi-receipt-cutoff"></i>
+      Vous avez {{ active_orders_count }} commande{{ 's' if active_orders_count != 1 else '' }} en cours.
+      <a href="{{ url_for('admin_orders') }}" class="fw-bold ms-auto">Voir les commandes →</a>
+    </div>
+  {% endif %}
+
+  <div class="alert alert-light border small mb-4">
+    <i class="bi bi-arrows-move me-1"></i>
+    Glissez-déposez les catégories ou les plats (via l'icône ⠿) pour changer leur ordre d'affichage sur le menu public.
+    <strong>Mode rush :</strong> mettez une catégorie entière en pause si la cuisine est débordée.
+    Utilisez l'icône <i class="bi bi-pencil-square"></i> pour modifier un plat ou le nom d'une catégorie, et
+    y associer des <strong>suggestions de vente additionnelle</strong> (ex : proposer un Bissap avec le Riz au gras).
+  </div>
+
+  <div class="card mf-section-card mb-4">
+    <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+      <span class="mf-section-title">Nouvelle catégorie</span>
+      <form method="post" action="{{ url_for('add_category') }}" class="d-flex gap-2 flex-grow-1" style="min-width: 220px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="name" class="form-control" maxlength="80" placeholder="Ex : Entrées, Plats, Boissons…" required>
+        <button type="submit" class="btn btn-primary text-nowrap"><i class="bi bi-plus-lg me-1"></i>Ajouter</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="categories-list" data-reorder-url="{{ url_for('reorder_categories') }}">
+    {% for category in categories %}
+      <div class="card mf-section-card mb-3 mf-category-block {{ 'mf-category-paused' if category.is_paused else '' }}" data-id="{{ category.id }}">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+            <span class="mf-drag-handle">⠿</span>
+            <h2 class="h6 mb-0 fw-bold">{{ category.name }}</h2>
+            <button type="button" class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 mf-edit-category-btn"
+                    data-bs-toggle="modal" data-bs-target="#edit-category-modal"
+                    data-category-id="{{ category.id }}" data-category-name="{{ category.name }}"
+                    title="Renommer la catégorie">
+              <i class="bi bi-pencil-square"></i>
+            </button>
+            {% if category.is_paused %}
+              <span class="badge" style="background:#F8E0DD; color:#C4453A;"><i class="bi bi-pause-circle-fill me-1"></i>En pause</span>
+            {% endif %}
+            <form method="post" action="{{ url_for('toggle_category_pause', category_id=category.id) }}" class="ms-auto">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm {{ 'btn-outline-secondary' if category.is_paused else 'btn-outline-danger' }}">
+                {% if category.is_paused %}
+                  <i class="bi bi-play-circle me-1"></i>Réactiver
+                {% else %}
+                  <i class="bi bi-pause-circle me-1"></i>Mettre en pause
+                {% endif %}
+              </button>
+            </form>
+          </div>
+
+          <form method="post" action="{{ url_for('add_item') }}" enctype="multipart/form-data"
+                class="row g-2 align-items-center mb-3 p-2 rounded" style="background: var(--mf-bg);">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="category_id" value="{{ category.id }}">
+            <div class="col-md-3"><input type="text" name="name" class="form-control form-control-sm" maxlength="120" placeholder="Nom du plat" required></div>
+            <div class="col-md-2"><input type="text" name="description" class="form-control form-control-sm" maxlength="300" placeholder="Description"></div>
+            <div class="col-md-2"><input type="number" name="price" class="form-control form-control-sm" placeholder="Prix (FCFA)" required></div>
+            <div class="col-md-2">
+              <div class="input-group input-group-sm">
+                <span class="input-group-text"><i class="bi bi-clock-history"></i></span>
+                <input type="number" name="prep_minutes" class="form-control" placeholder="Min." value="10" min="1" max="180">
+              </div>
+            </div>
+            <div class="col-md-2"><input type="file" name="photo" accept="image/*" class="form-control form-control-sm"></div>
+            <div class="col-md-1"><button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-plus-lg"></i></button></div>
+          </form>
+
+          {% if category.items %}
+            <table class="table align-middle mb-0">
+              <thead>
+                <tr class="small text-secondary text-uppercase">
+                  <th style="width:28px;"></th><th>Plat</th><th>Prix</th><th>Préparation</th><th>Disponibilité</th><th></th>
+                </tr>
+              </thead>
+              <tbody class="mf-items-tbody" data-reorder-url="{{ url_for('reorder_items') }}" data-category-id="{{ category.id }}">
+                {% for item in category.items %}
+                  <tr data-id="{{ item.id }}">
+                    <td class="text-center"><span class="mf-drag-handle">⠿</span></td>
+                    <td>
+                      <div class="d-flex align-items-center gap-2">
+                        {% if item.photo_url %}
+                          <img src="{{ item.photo_url }}" class="mf-thumb">
+                        {% else %}
+                          <div class="mf-thumb-empty"><i class="bi bi-egg-fried"></i></div>
+                        {% endif %}
+                        <div>
+                          <div class="fw-semibold">{{ item.name }}</div>
+                          {% if item.description %}<div class="small text-secondary">{{ item.description }}</div>{% endif %}
+                          {% if item_suggestion_ids.get(item.id) %}
+                            <div class="small" style="color: var(--mf-accent-dark);">
+                              <i class="bi bi-tags-fill me-1"></i>{{ item_suggestion_ids[item.id]|length }} suggestion{{ 's' if item_suggestion_ids[item.id]|length != 1 else '' }}
+                            </div>
+                          {% endif %}
+                        </div>
+                      </div>
+                    </td>
+                    <td class="fw-bold" style="color: var(--mf-accent-dark);">{{ "{:,}".format(item.price).replace(",", " ") }} {{ restaurant.currency }}</td>
+                    <td class="small text-secondary"><i class="bi bi-clock-history me-1"></i>~{{ item.prep_minutes }} min</td>
+                    <td>
+                      <form method="post" action="{{ url_for('toggle_item', item_id=item.id) }}" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm mf-pill-toggle border-0"
+                                style="background-color: {{ '#E2F3EA' if item.is_available else '#F8E0DD' }}; color: {{ '#2E7D5B' if item.is_available else '#C4453A' }};">
+                          <i class="bi {{ 'bi-check-circle-fill' if item.is_available else 'bi-x-circle-fill' }} me-1"></i>
+                          {{ 'Disponible' if item.is_available else 'Épuisé' }}
+                        </button>
+                      </form>
+                    </td>
+                    <td>
+                      <div class="d-flex gap-1">
+                        <button type="button" class="btn btn-sm btn-outline-secondary border-0 mf-edit-item-btn"
+                                data-bs-toggle="modal" data-bs-target="#edit-item-modal"
+                                data-item-id="{{ item.id }}" data-item-name="{{ item.name }}"
+                                data-item-description="{{ item.description or '' }}" data-item-price="{{ item.price }}"
+                                data-item-prep="{{ item.prep_minutes }}" data-item-photo="{{ item.photo_url or '' }}"
+                                data-item-suggestions="{{ item_suggestion_ids.get(item.id, [])|join(',') }}"
+                                title="Modifier ce plat">
+                          <i class="bi bi-pencil-square"></i>
+                        </button>
+                        <form method="post" action="{{ url_for('delete_item', item_id=item.id) }}"
+                              class="mf-confirm d-inline" data-confirm-message="Supprimer définitivement ce plat ?">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <button type="submit" class="btn btn-sm btn-outline-danger border-0"><i class="bi bi-trash3"></i></button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="text-secondary small mb-0">Aucun plat dans cette catégorie pour l'instant.</p>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="modal fade" id="edit-item-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form method="post" id="edit-item-form" enctype="multipart/form-data" class="modal-content">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header border-0">
+        <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Modifier le plat</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2">
+          <div class="col-12">
+            <label class="form-label small">Nom du plat</label>
+            <input type="text" name="name" id="edit-item-name" class="form-control" maxlength="120" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label small">Description</label>
+            <input type="text" name="description" id="edit-item-description" class="form-control" maxlength="300">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">Prix (FCFA)</label>
+            <input type="number" name="price" id="edit-item-price" class="form-control" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label small">Préparation (min)</label>
+            <input type="number" name="prep_minutes" id="edit-item-prep" class="form-control" min="1" max="180">
+          </div>
+          <div class="col-12">
+            <label class="form-label small">Remplacer la photo (optionnel)</label>
+            <input type="file" name="photo" accept="image/*" class="form-control">
+            <div class="small text-secondary mt-1" id="edit-item-current-photo"></div>
+          </div>
+          <div class="col-12">
+            <hr class="my-2">
+            <label class="form-label small fw-semibold">
+              <i class="bi bi-tags-fill me-1" style="color: var(--mf-accent-dark);"></i>Suggestions de vente additionnelle
+            </label>
+            <p class="small text-secondary mb-2">
+              Ces plats seront suggérés au client juste avant l'envoi de sa commande, dès qu'il ajoute celui-ci.
+            </p>
+            <div class="mf-suggestion-list" id="edit-item-suggestions-list">
+              {% for cat in categories %}
+                {% for other_item in cat.items %}
+                  <div class="form-check mf-suggestion-check" data-item-id="{{ other_item.id }}">
+                    <input class="form-check-input" type="checkbox" name="suggested_item_ids"
+                           value="{{ other_item.id }}" id="sugg-{{ other_item.id }}">
+                    <label class="form-check-label small" for="sugg-{{ other_item.id }}">
+                      {{ other_item.name }} <span class="text-secondary">({{ cat.name }})</span>
+                    </label>
+                  </div>
+                {% endfor %}
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="edit-category-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form method="post" id="edit-category-form" class="modal-content">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header border-0">
+        <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Renommer la catégorie</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label small">Nom de la catégorie</label>
+        <input type="text" name="name" id="edit-category-name" class="form-control" maxlength="80" required>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var editItemForm = document.getElementById("edit-item-form");
+  document.querySelectorAll(".mf-edit-item-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var itemId = btn.dataset.itemId;
+      editItemForm.action = "/admin/items/" + itemId + "/edit";
+      document.getElementById("edit-item-name").value = btn.dataset.itemName || "";
+      document.getElementById("edit-item-description").value = btn.dataset.itemDescription || "";
+      document.getElementById("edit-item-price").value = btn.dataset.itemPrice || "";
+      document.getElementById("edit-item-prep").value = btn.dataset.itemPrep || "10";
+      var photoNote = document.getElementById("edit-item-current-photo");
+      photoNote.textContent = btn.dataset.itemPhoto
+        ? "Une photo est déjà associée à ce plat ; choisissez un fichier uniquement pour la remplacer."
+        : "Aucune photo actuellement associée à ce plat.";
+
+      var suggestionIds = (btn.dataset.itemSuggestions || "").split(",").filter(Boolean);
+      document.querySelectorAll("#edit-item-suggestions-list .mf-suggestion-check").forEach(function (row) {
+        var rid = row.dataset.itemId;
+        var checkbox = row.querySelector("input[type=checkbox]");
+        if (rid === itemId) {
+          row.style.display = "none";
+          checkbox.checked = false;
+        } else {
+          row.style.display = "";
+          checkbox.checked = suggestionIds.indexOf(rid) !== -1;
+        }
+      });
+    });
+  });
+
+  var editCategoryForm = document.getElementById("edit-category-form");
+  document.querySelectorAll(".mf-edit-category-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var categoryId = btn.dataset.categoryId;
+      editCategoryForm.action = "/admin/categories/" + categoryId + "/edit";
+      document.getElementById("edit-category-name").value = btn.dataset.categoryName || "";
+    });
+  });
+});
+</script>
+{% endblock %}

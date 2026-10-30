@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Journal de sécurité — {{ restaurant.name }}{% endblock %}
+{% block content %}
+{% include "_admin_navbar.html" %}
+
+<div class="container py-4" style="max-width: 900px;">
+  <div class="alert alert-light border small mb-4">
+    <i class="bi bi-info-circle-fill me-1" style="color: var(--mf-accent);"></i>
+    Journal des connexions, tentatives échouées, changements de mot de passe, et actions sur les comptes
+    de votre équipe, pour le restaurant actuellement actif. Les 200 derniers événements sont affichés.
+  </div>
+
+  <div class="card mf-section-card">
+    <div class="card-body">
+      {% if logs %}
+        {% for log in logs %}
+          <div class="mf-audit-row d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+              <span class="badge {{ 'mf-audit-badge-ok' if log.success else 'mf-audit-badge-fail' }} me-2">
+                {{ "✓" if log.success else "✗" }}
+              </span>
+              <strong>{{ log.action }}</strong>
+              {% if log.user_email %} — {{ log.user_email }}{% endif %}
+              {% if log.details %}<div class="small text-secondary mt-1">{{ log.details }}</div>{% endif %}
+            </div>
+            <div class="text-end">
+              <div class="small text-secondary">{{ log.created_at.strftime('%d/%m/%Y %H:%M') }}</div>
+              <div class="mf-audit-ip">{{ log.ip_address }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="text-secondary small mb-0">Aucun événement enregistré pour l'instant.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

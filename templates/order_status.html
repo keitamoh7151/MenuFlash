@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Commande #{{ order.id }} — {{ restaurant.name }}{% endblock %}
+
+{% block theme_override %}
+<style>
+  :root {
+    --mf-accent: {{ restaurant.theme_colors.accent }};
+    --mf-accent-dark: {{ restaurant.theme_colors.accent_dark }};
+    --mf-accent-light: {{ restaurant.theme_colors.accent_light }};
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="public-theme-sync-root" data-stream-url="{{ url_for('public_theme_stream', slug=restaurant.slug) }}" class="visually-hidden"></div>
+<script id="mf-i18n-data" type="application/json">{{ translations|tojson }}</script>
+
+<header class="mf-hero">
+  <div class="mf-lang-toggle" role="group" aria-label="Choisir la langue / Choose language">
+    <i class="bi bi-translate mf-lang-icon"></i>
+    <button type="button" class="mf-lang-btn active" data-lang="fr">FR</button>
+    <button type="button" class="mf-lang-btn" data-lang="en">EN</button>
+  </div>
+  <h1 class="mb-1">{{ restaurant.name }}</h1>
+  <p class="mf-subtitle mb-0" data-i18n="order_ref_prefix">Suivi de votre commande</p>
+</header>
+
+<main class="container" style="max-width: 540px; margin-top: -32px;">
+  <div class="card mf-order-card mb-3" id="order-status-root"
+       data-poll-url="{{ url_for('order_status_json', slug=restaurant.slug, order_id=order.id) }}"
+       data-cancel-url="{{ url_for('cancel_order_by_client', slug=restaurant.slug, order_id=order.id) }}"
+       data-status="{{ order.status }}"
+       data-status-label="{{ status_labels[order.status] }}">
+    <div class="card-body p-4">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <span class="mf-status-badge badge mf-status-{{ order.status }}" id="status-badge" data-i18n="status_{{ order.status }}">{{ status_labels[order.status] }}</span>
+        {% if order.status == 'nouvelle' %}
+          <button type="button" class="btn btn-outline-danger btn-sm" id="cancel-order-btn" data-i18n="cancel_order_btn">
+            <i class="bi bi-x-circle me-1"></i>Annuler la commande
+          </button>
+        {% endif %}
+      </div>
+
+      {% if order.status not in ['annulee'] %}
+        <div class="mt-3">
+          <div class="progress mf-progress">
+            <div class="progress-bar" id="status-progress-bar" role="progressbar" style="width: 0%;"></div>
+          </div>
+          <div class="mf-step-labels">
+            <span data-i18n="step_nouvelle">Nouvelle</span>
+            <span data-i18n="step_en_preparation">En préparation</span>
+            <span data-i18n="step_prete">Prête</span>
+            <span data-i18n="step_servie">Servie</span>
+          </div>
+        </div>
+      {% endif %}
+
+      <p class="text-secondary small mt-3 mb-1">
+        <span data-i18n="order_ref_prefix">Commande</span> #{{ order.id }}{% if order.table_label %} · {{ order.table_label }}{% endif %}
+      </p>
+
+      {% if order.status not in ['servie', 'annulee'] and order.estimated_prep_minutes %}
+        <p class="small mb-3" style="color: var(--mf-accent-dark);">
+          <i class="bi bi-clock-history me-1"></i>
+          <span data-i18n="prep_time_label">Temps de préparation estimé</span> : ~{{ order.estimated_prep_minutes }} <span data-i18n="prep_time_min">min</span>
+        </p>
+      {% endif %}
+
+      <ul class="list-group list-group-flush mb-3">
+        {% for item in order.items %}
+          <li class="list-group-item d-flex justify-content-between px-0">
+            <span>{{ item.quantity }} × {{ item.item_name }}</span>
+            <span class="fw-semibold">{{ "{:,}".format(item.item_price * item.quantity).replace(",", " ") }} {{ restaurant.currency }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+
+      <div class="d-flex justify-content-between fw-bold fs-5 mb-2">
+        <span data-i18n="order_total">Total</span>
+        <span>{{ "{:,}".format(order.total).replace(",", " ") }} {{ restaurant.currency }}</span>
+      </div>
+
+      {% if order.notes %}
+        <p class="small text-secondary">📝 {{ order.notes }}</p>
+      {% endif %}
+
+      {% if order.status not in ['servie', 'annulee'] %}
+        <p class="small text-secondary fst-italic mb-0" data-i18n="order_autoupdate">Cette page se met à jour automatiquement.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if order.status == 'servie' and not order.reviewed %}
+    <div class="card mf-order-card mb-3" id="review-card"
+         data-submit-url="{{ url_for('submit_review', slug=restaurant.slug, order_id=order.id) }}">
+      <div class="card-body p-4">
+        <h2 class="h6 mb-1" data-i18n="review_title">Votre avis compte !</h2>
+        <p class="text-secondary small mb-3" data-i18n="review_subtitle">Notez les plats que vous avez commandés</p>
+        <div id="review-items">
+          {% for item in order.items %}
+            <div class="mf-review-row" data-item-id="{{ item.id }}">
+              <span class="mf-review-name">{{ item.item_name }}</span>
+              <div class="mf-star-picker" data-item-id="{{ item.id }}">
+                <input type="hidden" name="rating_{{ item.id }}" value="0">
+                {% for n in range(1, 6) %}
+                  <i class="bi bi-star mf-star" data-value="{{ n }}"></i>
+                {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <textarea id="review-comment" class="form-control mt-2" rows="2" maxlength="500" data-i18n-placeholder="review_comment_placeholder" placeholder="Un commentaire pour le restaurant (optionnel)"></textarea>
+        <button type="button" class="btn btn-primary w-100 mt-3" id="review-submit-btn" data-i18n="review_submit">Envoyer mon avis</button>
+      </div>
+    </div>
+  {% elif order.reviewed %}
+    <div class="alert text-center mb-3" style="background: var(--mf-accent-light); color: var(--mf-accent-dark);" data-i18n="review_thanks">
+      Merci pour votre avis !
+    </div>
+  {% endif %}
+
+  <a class="btn btn-outline-secondary w-100 mb-4" data-i18n="back_to_menu"
+     href="{{ url_for('public_menu', slug=restaurant.slug, t=order.table_label) if order.table_label else url_for('public_menu', slug=restaurant.slug) }}">
+    <i class="bi bi-arrow-left me-1"></i> Retour au menu
+  </a>
+</main>
+
+<div class="modal fade" id="cancel-order-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-body text-center p-4">
+        <div class="mb-3"><i class="bi bi-exclamation-triangle-fill text-danger" style="font-size: 2.2rem;"></i></div>
+        <h5 class="mb-2" data-i18n="cancel_order_confirm_title">Annuler cette commande ?</h5>
+        <p class="text-secondary small mb-0" data-i18n="cancel_order_confirm_body">Cette action est définitive. La cuisine sera informée immédiatement.</p>
+      </div>
+      <div class="modal-footer border-0 justify-content-center pb-4">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="cancel_order_confirm_no">Non, garder</button>
+        <button type="button" class="btn btn-danger" id="cancel-order-confirm-btn">
+          <span class="confirm-label" data-i18n="cancel_order_confirm_yes">Oui, annuler</span>
+          <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer class="text-center text-secondary small py-4">
+  <span data-i18n="footer_powered">Propulsé par</span> <strong class="text-dark">MenuFlash Mini</strong>
+</footer>
+{% endblock %}

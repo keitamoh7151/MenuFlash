@@ -1,0 +1,29 @@
+{% if current_user.is_authenticated and current_user.is_owner and not current_user.is_super_admin and owner_restaurants %}
+<div class="modal fade" id="new-restaurant-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form method="post" action="{{ url_for('admin_restaurants_new') }}" class="modal-content">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header border-0">
+        <h5 class="modal-title"><i class="bi bi-shop me-2"></i>Ajouter un nouveau restaurant</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-secondary small">
+          Gérez plusieurs établissements depuis ce même compte, sans connexion
+          séparée. Le nouveau restaurant démarre avec un essai gratuit de 7 jours.
+        </p>
+        <label class="form-label small fw-semibold">Nom du restaurant</label>
+        <input type="text" name="name" class="form-control mb-2" maxlength="120"
+               placeholder="Ex : Chez Awa — Terrasse" required>
+        <label class="form-label small fw-semibold">Identifiant d'URL (optionnel)</label>
+        <input type="text" name="slug" class="form-control" maxlength="80"
+               placeholder="Laissez vide pour générer automatiquement">
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Créer</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}

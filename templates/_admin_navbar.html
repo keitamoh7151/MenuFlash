@@ -1,0 +1,127 @@
+{# ==========================================================================
+   Barre de navigation du back-office — SOURCE UNIQUE incluse par toutes
+   les pages restaurant (tableau de bord, commandes, QR codes, apparence,
+   équipe, historique, sécurité, mot de passe). Centraliser la navigation
+   ici évite que les pages divergent entre elles au fil des évolutions.
+
+   Deux changements majeurs par rapport à la version précédente :
+   1. MARQUE DU RESTAURANT (pas de l'application) : le logo et le nom du
+      restaurant actif remplacent "MenuFlash Mini" — conformément à la
+      demande du restaurateur de voir SON établissement, pas la
+      plateforme, une fois connecté à son tableau de bord. Si aucun logo
+      n'a été téléversé, une icône générique de boutique s'affiche à la
+      place (voir Apparence > Logo du restaurant pour l'ajouter).
+   2. NAVIGATION REGROUPÉE EN MENUS DÉROULANTS : au lieu d'aligner une
+      dizaine de boutons (qui finissaient par se replier sur 2 lignes et
+      rendre la page peu lisible), seuls 2 liens directs restent visibles
+      ("Menu" et "Commandes", les plus utilisés), et le reste est
+      regroupé dans 3 menus déroulants thématiques : "Boutique" (ce que
+      voient/scannent les clients), "Gestion" (pilotage de l'activité) et
+      "Compte" (sécurité du compte connecté).
+
+   Ce partiel n'est PAS utilisé par le panel super-admin (qui garde sa
+   propre barre "MenuFlash Mini · Panel super-admin", car il ne gère pas
+   un restaurant précis mais l'ensemble de la plateforme).
+   ========================================================================== #}
+<nav class="navbar navbar-expand-lg mf-navbar sticky-top">
+  <div class="container-fluid px-3 px-md-4">
+    <a href="{{ url_for('admin_dashboard') if current_user.is_owner else url_for('admin_orders') }}"
+       class="navbar-brand d-flex align-items-center gap-2 mb-0 text-decoration-none">
+      {% if restaurant and restaurant.logo_url %}
+        <img src="{{ restaurant.logo_url }}" alt="{{ restaurant.name }}" class="mf-navbar-logo">
+      {% else %}
+        <span class="mf-navbar-logo-placeholder"><i class="bi bi-shop"></i></span>
+      {% endif %}
+      <span>{{ restaurant.name if restaurant else "MenuFlash Mini" }}</span>
+      {% if not current_user.is_owner %}
+        <span class="badge rounded-pill mf-cuisine-badge ms-1">Cuisine</span>
+      {% endif %}
+    </a>
+
+    {% if current_user.is_owner %}
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain" aria-label="Menu">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse justify-content-end" id="navMain">
+        <ul class="navbar-nav align-items-lg-center gap-lg-2 flex-wrap py-2 py-lg-0 list-unstyled d-flex mb-0">
+          <li class="nav-item">{% include "_restaurant_switcher.html" %}</li>
+
+          <li class="nav-item">
+            <a class="btn btn-sm {{ 'btn-primary' if request.endpoint == 'admin_dashboard' else 'btn-outline-secondary' }}"
+               href="{{ url_for('admin_dashboard') }}">
+              <i class="bi bi-journal-richtext me-1"></i>Menu
+            </a>
+          </li>
+
+          <li class="nav-item">
+            <a class="btn btn-sm position-relative {{ 'btn-primary' if request.endpoint == 'admin_orders' else 'btn-outline-secondary' }}"
+               href="{{ url_for('admin_orders') }}">
+              <i class="bi bi-receipt-cutoff me-1"></i>Commandes
+              {% if nav_active_orders_count %}
+                <span class="badge rounded-pill bg-danger ms-1">{{ nav_active_orders_count }}</span>
+              {% endif %}
+            </a>
+          </li>
+
+          <li class="nav-item dropdown">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+              <i class="bi bi-shop-window me-1"></i>Boutique
+            </button>
+            <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+              <li><a class="dropdown-item" href="{{ url_for('public_menu', slug=restaurant.slug) }}" target="_blank" rel="noopener">
+                <i class="bi bi-eye me-2"></i>Voir le menu public</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_qrcodes') }}">
+                <i class="bi bi-qr-code me-2"></i>Codes QR</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_appearance') }}">
+                <i class="bi bi-palette me-2"></i>Apparence &amp; logo</a></li>
+            </ul>
+          </li>
+
+          <li class="nav-item dropdown">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+              <i class="bi bi-graph-up me-1"></i>Gestion
+            </button>
+            <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+              <li><a class="dropdown-item" href="{{ url_for('admin_statistics') }}">
+                <i class="bi bi-graph-up me-2"></i>Statistiques</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_team') }}">
+                <i class="bi bi-people me-2"></i>Équipe</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_history') }}">
+                <i class="bi bi-clock-history me-2"></i>Historique</a></li>
+            </ul>
+          </li>
+
+          <li class="nav-item dropdown">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+              <i class="bi bi-person-circle me-1"></i>Compte
+            </button>
+            <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+              <li><a class="dropdown-item" href="{{ url_for('admin_security_log') }}">
+                <i class="bi bi-shield-lock me-2"></i>Journal de sécurité</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('change_password') }}">
+                <i class="bi bi-key me-2"></i>Mot de passe</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_logout') }}">
+                <i class="bi bi-box-arrow-right me-2"></i>Déconnexion</a></li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+    {% else %}
+      {# Compte cuisinier : navigation volontairement minimale, pas d'accès
+         aux menus de gestion du restaurant. #}
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        {% if request.endpoint == 'admin_orders' %}
+          <span class="mf-live-indicator" id="live-indicator" title="Connexion temps réel">
+            <span class="mf-live-dot"></span> En direct
+          </span>
+        {% endif %}
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('change_password') }}">
+          <i class="bi bi-key me-1"></i>Mot de passe
+        </a>
+        <a class="btn btn-link btn-sm text-secondary" href="{{ url_for('admin_logout') }}">Déconnexion</a>
+      </div>
+    {% endif %}
+  </div>
+</nav>
+{% include "_new_restaurant_modal.html" %}

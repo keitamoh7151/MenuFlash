@@ -1,0 +1,34 @@
+{# ==========================================================================
+   Sélecteur de restaurant (mode multi-restaurant) — dropdown UNIQUEMENT.
+   Ne s'affiche que pour un compte "owner" ayant accès à plusieurs
+   restaurants. `owner_restaurants` est injecté automatiquement dans tous
+   les templates par le context processor `inject_owner_restaurants`.
+   ========================================================================== #}
+{% if current_user.is_authenticated and current_user.is_owner and not current_user.is_super_admin and owner_restaurants %}
+<div class="dropdown mf-restaurant-switcher">
+  <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
+          id="mf-restaurant-switcher-toggle"
+          data-bs-toggle="dropdown" aria-expanded="false" title="Changer de restaurant">
+    <i class="bi bi-shop me-1"></i>{{ restaurant.name if restaurant else "" }}
+  </button>
+  <ul class="dropdown-menu dropdown-menu-dark">
+    {% for r in owner_restaurants %}
+      <li>
+        <form method="post" action="{{ url_for('admin_restaurants_switch') }}" class="px-1">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="restaurant_id" value="{{ r.id }}">
+          <button type="submit" class="dropdown-item {{ 'active' if restaurant and r.id == restaurant.id else '' }}">
+            <i class="bi bi-shop me-1"></i>{{ r.name }}
+          </button>
+        </form>
+      </li>
+    {% endfor %}
+    <li><hr class="dropdown-divider"></li>
+    <li>
+      <button type="button" class="dropdown-item" id="open-new-restaurant-modal-btn">
+        <i class="bi bi-plus-circle me-1"></i>Nouveau restaurant
+      </button>
+    </li>
+  </ul>
+</div>
+{% endif %}

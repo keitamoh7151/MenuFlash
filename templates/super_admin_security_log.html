@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Journal de sécurité global — MenuFlash Mini{% endblock %}
+{% block content %}
+<nav class="navbar navbar-expand-lg mf-navbar sticky-top">
+  <div class="container-fluid px-3 px-md-4">
+    <span class="navbar-brand d-flex align-items-center gap-2 mb-0">
+      <i class="bi bi-qr-code-scan"></i> MenuFlash<span class="mf-brand-mini">Mini</span> <span class="text-secondary fw-normal small">· Panel super-admin</span>
+    </span>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('super_admin_dashboard') }}"><i class="bi bi-arrow-left me-1"></i>Retour au panel</a>
+      <a class="btn btn-link btn-sm text-secondary" href="{{ url_for('admin_logout') }}">Déconnexion</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-4" style="max-width: 1040px;">
+  <div class="alert alert-light border small mb-4">
+    <i class="bi bi-info-circle-fill me-1" style="color: var(--mf-accent);"></i>
+    Journal de sécurité global, tous restaurants confondus (connexions, verrouillages, changements de mot de passe, actions d'équipe et de super-admin). Les 300 derniers événements sont affichés.
+  </div>
+
+  <div class="card mf-section-card">
+    <div class="card-body">
+      {% if logs %}
+        {% for log in logs %}
+          <div class="mf-audit-row d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+              <span class="badge {{ 'mf-audit-badge-ok' if log.success else 'mf-audit-badge-fail' }} me-2">
+                {{ "✓" if log.success else "✗" }}
+              </span>
+              <strong>{{ log.action }}</strong>
+              {% if log.user_email %} — {{ log.user_email }}{% endif %}
+              {% if log.restaurant_id %}<span class="small text-secondary"> (restaurant #{{ log.restaurant_id }})</span>{% endif %}
+              {% if log.details %}<div class="small text-secondary mt-1">{{ log.details }}</div>{% endif %}
+            </div>
+            <div class="text-end">
+              <div class="small text-secondary">{{ log.created_at.strftime('%d/%m/%Y %H:%M') }}</div>
+              <div class="mf-audit-ip">{{ log.ip_address }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="text-secondary small mb-0">Aucun événement enregistré pour l'instant.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

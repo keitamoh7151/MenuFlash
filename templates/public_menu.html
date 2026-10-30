@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}{{ restaurant.name }} — Menu{% endblock %}
+
+{% block theme_override %}
+<style>
+  :root {
+    --mf-accent: {{ restaurant.theme_colors.accent }};
+    --mf-accent-dark: {{ restaurant.theme_colors.accent_dark }};
+    --mf-accent-light: {{ restaurant.theme_colors.accent_light }};
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div id="public-theme-sync-root" data-stream-url="{{ url_for('public_theme_stream', slug=restaurant.slug) }}" class="visually-hidden"></div>
+<script id="mf-i18n-data" type="application/json">{{ translations|tojson }}</script>
+<script id="mf-suggestions-data" type="application/json">{{ item_suggestions|tojson }}</script>
+
+<header class="mf-hero">
+  <div class="mf-lang-toggle" role="group" aria-label="Choisir la langue / Choose language">
+    <i class="bi bi-translate mf-lang-icon"></i>
+    <button type="button" class="mf-lang-btn active" data-lang="fr">FR</button>
+    <button type="button" class="mf-lang-btn" data-lang="en">EN</button>
+  </div>
+
+  {% if restaurant.logo_url %}
+    <img src="{{ restaurant.logo_url }}" alt="{{ restaurant.name }}" class="mf-logo">
+  {% endif %}
+  <h1 class="mb-1">{{ restaurant.name }}</h1>
+  <p class="mf-subtitle mb-2" data-i18n="brand_tagline">Choisissez vos plats et envoyez votre commande</p>
+  {% if table_label %}
+    <span class="badge rounded-pill mf-table-badge px-3 py-2"><i class="bi bi-cup-hot-fill me-1"></i>{{ table_label }}</span>
+  {% endif %}
+</header>
+
+<button type="button" class="btn btn-dark rounded-pill shadow mf-myorders-fab" id="my-orders-toggle"
+        data-bs-toggle="offcanvas" data-bs-target="#my-orders-offcanvas">
+  <i class="bi bi-receipt"></i>
+  <span data-i18n="my_orders">Mes commandes</span>
+  <span class="badge rounded-pill bg-danger d-none" id="my-orders-badge">0</span>
+</button>
+
+<div class="mf-addmode-banner d-none" id="addmode-banner">
+  <div class="container d-flex align-items-center gap-2 flex-wrap" style="max-width: 680px;">
+    <i class="bi bi-plus-circle-fill"></i>
+    <span data-i18n="addmode_banner_prefix">Vous ajoutez des plats à la commande</span>&nbsp;<strong id="addmode-order-ref">#—</strong>
+    <button type="button" class="btn btn-sm btn-outline-light ms-auto" id="addmode-cancel" data-i18n="addmode_cancel">Annuler</button>
+  </div>
+</div>
+
+{% if categories %}
+<nav class="mf-nav-pills container">
+  {% for category in categories %}
+    <a class="nav-link" href="#cat-{{ category.id }}">{{ category.name }}</a>
+  {% endfor %}
+</nav>
+{% endif %}
+
+<form method="post" action="{{ url_for('place_order', slug=restaurant.slug) }}" id="order-form"
+      data-currency="{{ restaurant.currency }}" data-slug="{{ restaurant.slug }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="table_label" value="{{ table_label or '' }}">
+  <input type="hidden" name="qr_id" value="{{ request.args.get('qr', '') }}">
+
+  <main class="container" style="max-width: 680px; padding-bottom: 110px;">
+    {% for category in categories %}
+      <section id="cat-{{ category.id }}" class="pt-2" style="scroll-margin-top: 80px;">
+        <h2 class="mf-category-title fs-5">{{ category.name }}</h2>
+
+        {% for item in category.items if item.is_available %}
+          <div class="card mf-item-card hover-lift mb-3">
+            <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+              {% if item.photo_url %}
+                <img src="{{ item.photo_url }}" alt="{{ item.name }}" class="mf-item-img" loading="lazy">
+              {% else %}
+                <div class="mf-item-noimg"><i class="bi bi-egg-fried"></i></div>
+              {% endif %}
+              <div class="flex-grow-1" style="min-width: 140px;">
+                <h3 class="h6 mb-1">{{ item.name }}</h3>
+                {% if item.description %}<p class="mf-item-desc mb-1">{{ item.description }}</p>{% endif %}
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <p class="mf-item-price mb-0">{{ "{:,}".format(item.price).replace(",", " ") }} {{ restaurant.currency }}</p>
+                  <span class="mf-prep-chip">
+                    <i class="bi bi-clock-history"></i> ~{{ item.prep_minutes }} <span data-i18n="prep_time_min">min</span>
+                  </span>
+                  {% if ratings.get(item.id) %}
+                    <span class="mf-rating-chip">
+                      <i class="bi bi-star-fill"></i> {{ ratings[item.id].avg }}
+                      <span class="text-secondary">· {{ ratings[item.id].count }} <span data-i18n="reviews_suffix">avis</span></span>
+                    </span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="mf-qty-group d-flex align-items-center gap-2 ms-auto" data-item-id="{{ item.id }}" data-price="{{ item.price }}" data-name="{{ item.name }}">
+                <input type="hidden" name="qty_{{ item.id }}" value="0">
+                <button type="button" class="btn btn-outline-secondary mf-qty-minus">−</button>
+                <span class="mf-qty-value">0</span>
+                <button type="button" class="btn btn-outline-secondary mf-qty-plus">+</button>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </section>
+    {% endfor %}
+
+    {% if categories %}
+      <div class="mt-4">
+        <label for="notes" class="form-label fw-semibold small text-secondary" data-i18n="notes_label">Une précision pour la cuisine ? (optionnel)</label>
+        <textarea id="notes" name="notes" class="form-control" rows="2" data-i18n-placeholder="notes_placeholder" placeholder="Ex : sans piment, allergie à l'arachide…" maxlength="300"></textarea>
+      </div>
+    {% else %}
+      <p class="text-center text-secondary py-5" data-i18n="menu_empty">Le menu sera bientôt disponible.</p>
+    {% endif %}
+  </main>
+
+  {% if categories %}
+    <div class="mf-cart-bar" id="cart-bar">
+      <div class="container d-flex align-items-center justify-content-between" style="max-width: 680px;">
+        <div>
+          <div id="cart-count" class="small">0 <span data-i18n="cart_article_other">articles</span></div>
+          <div id="cart-total" class="mf-cart-total">0 {{ restaurant.currency }}</div>
+        </div>
+        <button type="button" id="cart-submit" class="btn btn-primary px-4" disabled>
+          <span id="cart-submit-label" data-i18n="cart_submit_default">Voir ma commande</span> <i class="bi bi-arrow-right ms-1"></i>
+        </button>
+      </div>
+    </div>
+  {% endif %}
+</form>
+
+<div class="modal fade" id="order-recap-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title" id="order-recap-title" data-i18n="recap_title_default">Récapitulatif de votre commande</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="order-recap-body"></div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="recap_modify">Modifier</button>
+        <button type="button" class="btn btn-primary" id="order-recap-confirm">
+          <span class="confirm-label" data-i18n="cart_submit_confirm">Confirmer l'envoi</span>
+          <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="cancel-order-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-body text-center p-4">
+        <div class="mb-3"><i class="bi bi-exclamation-triangle-fill text-danger" style="font-size: 2.2rem;"></i></div>
+        <h5 class="mb-2" data-i18n="cancel_order_confirm_title">Annuler cette commande ?</h5>
+        <p class="text-secondary small mb-0" data-i18n="cancel_order_confirm_body">Cette action est définitive. La cuisine sera informée immédiatement.</p>
+      </div>
+      <div class="modal-footer border-0 justify-content-center pb-4">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="cancel_order_confirm_no">Non, garder</button>
+        <button type="button" class="btn btn-danger" id="cancel-order-confirm-btn">
+          <span class="confirm-label" data-i18n="cancel_order_confirm_yes">Oui, annuler</span>
+          <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="offcanvas offcanvas-end" tabindex="-1" id="my-orders-offcanvas">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title"><i class="bi bi-receipt me-2"></i><span data-i18n="my_orders">Mes commandes</span></h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+  </div>
+  <div class="offcanvas-body">
+    <p class="text-secondary small" id="my-orders-empty" data-i18n="my_orders_empty">
+      Vous n'avez pas encore passé de commande. Ajoutez des plats et envoyez votre commande pour la voir apparaître ici.
+    </p>
+    <div id="my-orders-list"></div>
+  </div>
+</div>
+
+<footer class="text-center text-secondary small py-4">
+  <span data-i18n="footer_powered">Propulsé par</span> <strong class="text-dark">MenuFlash Mini</strong>
+</footer>
+{% endblock %}

@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Commandes — {{ restaurant.name }}{% endblock %}
+{% block content %}
+{% include "_admin_navbar.html" %}
+
+{% if not current_user.is_owner %}
+  <div class="container pt-3" style="max-width: 1040px;">
+    <div class="alert alert-light border small mb-0">
+      <i class="bi bi-info-circle-fill me-1" style="color: var(--mf-accent);"></i>
+      Vous avez accès uniquement à cette page : réceptionner les commandes et mettre à jour leur statut.
+      Les nouvelles commandes apparaissent automatiquement, avec un signal sonore. Si un client annule sa
+      commande avant qu'elle ne soit en préparation, elle disparaît instantanément de cette liste.
+    </div>
+  </div>
+{% endif %}
+
+<div class="container py-4" style="max-width: 1040px;">
+  {% if current_user.is_owner %}
+    <div class="d-flex justify-content-end mb-3">
+      {% if show_all %}
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_orders') }}"><i class="bi bi-arrow-counterclockwise me-1"></i>Commandes en cours</a>
+      {% else %}
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_orders', all=1) }}"><i class="bi bi-clock-history me-1"></i>Voir l'historique</a>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div id="kanban-root"
+       data-feed-url="{{ url_for('admin_orders_feed') }}"
+       data-currency="{{ restaurant.currency }}">
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <div class="p-3 mf-kanban-col">
+        <h2 class="d-flex justify-content-between align-items-center">
+          <span>🆕 Nouvelles</span>
+          <span class="mf-kanban-count" id="count-nouvelle">{{ columns.nouvelle|length }}</span>
+        </h2>
+        <div id="col-nouvelle">
+          {% for order in columns.nouvelle %}
+            <div class="card mf-order-card-k mb-2" data-order-id="{{ order.id }}">
+              <div class="card-body p-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <strong>{{ order.table_label or 'Sans table' }}</strong>
+                  <span class="mf-elapsed">{{ order.elapsed_minutes }} min</span>
+                </div>
+                <ul class="mb-2 ps-3 small">
+                  {% for item in order.items %}<li>{{ item.quantity }} × {{ item.item_name }}</li>{% endfor %}
+                </ul>
+                {% if order.notes %}<p class="mf-order-note mb-2">📝 {{ order.notes }}</p>{% endif %}
+                <p class="fw-bold mb-2" style="color: var(--mf-accent-dark);">{{ "{:,}".format(order.total).replace(",", " ") }} {{ restaurant.currency }}</p>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-outline-secondary btn-sm flex-grow-1 mf-advance-btn" data-order-id="{{ order.id }}">Marquer en préparation</button>
+                  <button class="btn btn-outline-danger btn-sm mf-cancel-btn" data-order-id="{{ order.id }}"><i class="bi bi-x-lg"></i></button>
+                </div>
+              </div>
+            </div>
+          {% else %}
+            <p class="text-muted small">Aucune commande.</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="p-3 mf-kanban-col">
+        <h2 class="d-flex justify-content-between align-items-center">
+          <span>👨‍🍳 En préparation</span>
+          <span class="mf-kanban-count" id="count-en_preparation">{{ columns.en_preparation|length }}</span>
+        </h2>
+        <div id="col-en_preparation">
+          {% for order in columns.en_preparation %}
+            <div class="card mf-order-card-k mb-2" data-order-id="{{ order.id }}">
+              <div class="card-body p-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <strong>{{ order.table_label or 'Sans table' }}</strong>
+                  <span class="mf-elapsed">{{ order.elapsed_minutes }} min</span>
+                </div>
+                <ul class="mb-2 ps-3 small">
+                  {% for item in order.items %}<li>{{ item.quantity }} × {{ item.item_name }}</li>{% endfor %}
+                </ul>
+                {% if order.notes %}<p class="mf-order-note mb-2">📝 {{ order.notes }}</p>{% endif %}
+                <p class="fw-bold mb-2" style="color: var(--mf-accent-dark);">{{ "{:,}".format(order.total).replace(",", " ") }} {{ restaurant.currency }}</p>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-outline-secondary btn-sm flex-grow-1 mf-advance-btn" data-order-id="{{ order.id }}">Marquer prête</button>
+                  <button class="btn btn-outline-danger btn-sm mf-cancel-btn" data-order-id="{{ order.id }}"><i class="bi bi-x-lg"></i></button>
+                </div>
+              </div>
+            </div>
+          {% else %}
+            <p class="text-muted small">Aucune commande.</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="p-3 mf-kanban-col">
+        <h2 class="d-flex justify-content-between align-items-center">
+          <span>✅ Prêtes</span>
+          <span class="mf-kanban-count" id="count-prete">{{ columns.prete|length }}</span>
+        </h2>
+        <div id="col-prete">
+          {% for order in columns.prete %}
+            <div class="card mf-order-card-k mb-2" data-order-id="{{ order.id }}">
+              <div class="card-body p-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <strong>{{ order.table_label or 'Sans table' }}</strong>
+                  <span class="mf-elapsed">{{ order.elapsed_minutes }} min</span>
+                </div>
+                <ul class="mb-2 ps-3 small">
+                  {% for item in order.items %}<li>{{ item.quantity }} × {{ item.item_name }}</li>{% endfor %}
+                </ul>
+                {% if order.notes %}<p class="mf-order-note mb-2">📝 {{ order.notes }}</p>{% endif %}
+                <p class="fw-bold mb-2" style="color: var(--mf-accent-dark);">{{ "{:,}".format(order.total).replace(",", " ") }} {{ restaurant.currency }}</p>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-outline-secondary btn-sm flex-grow-1 mf-advance-btn" data-order-id="{{ order.id }}">Marquer servie</button>
+                  <button class="btn btn-outline-danger btn-sm mf-cancel-btn" data-order-id="{{ order.id }}"><i class="bi bi-x-lg"></i></button>
+                </div>
+              </div>
+            </div>
+          {% else %}
+            <p class="text-muted small">Aucune commande.</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if show_all %}
+    <div class="card mf-section-card">
+      <div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Historique</h2>
+        {% if history %}
+          <table class="table align-middle">
+            <thead class="small text-secondary text-uppercase">
+              <tr><th>Table</th><th>Plats</th><th>Total</th><th>Statut</th></tr>
+            </thead>
+            <tbody>
+              {% for order in history %}
+                <tr>
+                  <td>{{ order.table_label or 'Sans table' }}</td>
+                  <td>{% for item in order.items %}{{ item.quantity }}×{{ item.item_name }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+                  <td class="fw-bold" style="color: var(--mf-accent-dark);">{{ "{:,}".format(order.total).replace(",", " ") }} {{ restaurant.currency }}</td>
+                  <td>
+                    {% if order.status == 'servie' %}
+                      <span class="badge" style="background:#E2F3EA; color: #2E7D5B;">Servie</span>
+                    {% elif order.status == 'annulee' and order.cancelled_by == 'client' %}
+                      <span class="badge" style="background:#F8E0DD; color: #C4453A;">Annulée par le client</span>
+                    {% else %}
+                      <span class="badge" style="background:#F8E0DD; color: #C4453A;">Annulée</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="text-secondary small mb-0">Aucune commande terminée pour l'instant.</p>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+  </div>
+</div>
+{% endblock %}

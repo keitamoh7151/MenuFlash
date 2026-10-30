@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Apparence — {{ restaurant.name }}{% endblock %}
+{% block content %}
+{% include "_admin_navbar.html" %}
+
+<div class="container py-4" style="max-width: 900px;">
+
+  <div class="card mf-section-card mb-4">
+    <div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-3">Logo du restaurant</h2>
+      <p class="text-secondary small mb-3">
+        Affiché à la place de « MenuFlash Mini » sur votre tableau de bord, et sur
+        votre menu public. Les formats JPG, PNG et WEBP sont acceptés ; un fond
+        transparent (PNG) est conservé tel quel.
+      </p>
+      <div class="d-flex align-items-center gap-3 flex-wrap">
+        {% if restaurant.logo_url %}
+          <img src="{{ restaurant.logo_url }}" alt="Logo actuel" class="mf-logo-preview">
+        {% else %}
+          <div class="mf-logo-preview-empty"><i class="bi bi-shop"></i></div>
+        {% endif %}
+
+        <form method="post" action="{{ url_for('admin_appearance_logo') }}" enctype="multipart/form-data"
+              class="d-flex gap-2 align-items-center flex-wrap">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="file" name="logo" accept="image/png,image/jpeg,image/webp" class="form-control form-control-sm" required>
+          <button type="submit" class="btn btn-primary btn-sm text-nowrap"><i class="bi bi-upload me-1"></i>Mettre à jour</button>
+        </form>
+
+        {% if restaurant.logo_url %}
+          <form method="post" action="{{ url_for('admin_appearance_logo_delete') }}"
+                class="mf-confirm" data-confirm-message="Supprimer le logo actuel ? « MenuFlash Mini » réapparaîtra à sa place.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-trash3 me-1"></i>Supprimer</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-light border d-flex gap-2 mb-4">
+    <i class="bi bi-info-circle-fill flex-shrink-0 mt-1" style="color: var(--mf-accent);"></i>
+    <div>
+      <strong>Cliquez sur un thème pour l'appliquer instantanément</strong> — pas besoin
+      d'enregistrer ni de recharger la page. Le changement s'applique immédiatement
+      sur votre menu public et sur toutes les pages déjà ouvertes (y compris celles de
+      votre équipe, sur d'autres appareils).
+    </div>
+  </div>
+
+  <div class="row g-3 mb-2" id="theme-grid">
+    {% for key, theme in themes.items() %}
+      <div class="col-6 col-md-4">
+        <label class="d-block position-relative">
+          <input type="radio" name="theme" value="{{ key }}" class="d-none mf-theme-radio"
+                 {% if restaurant.theme == key %}checked{% endif %}>
+          <div class="card mf-theme-card {{ 'selected' if restaurant.theme == key else '' }}"
+               style="--mf-theme-accent: {{ theme.accent }};" data-theme-key="{{ key }}"
+               data-accent="{{ theme.accent }}" data-accent-dark="{{ theme.accent_dark }}" data-accent-light="{{ theme.accent_light }}">
+            <div class="mf-theme-swatch"></div>
+            <div class="mf-theme-check"><i class="bi bi-check-lg"></i></div>
+            <div class="card-body py-2 text-center">
+              <strong class="small">{{ theme.label }}</strong>
+            </div>
+          </div>
+        </label>
+      </div>
+    {% endfor %}
+  </div>
+  <noscript>
+    <div class="alert alert-warning small">JavaScript est requis pour changer de thème.</div>
+  </noscript>
+
+  <hr class="my-4">
+
+  <h2 class="mf-section-title fs-6 mb-3">Aperçu de votre menu public</h2>
+  <p class="text-secondary small mb-3">
+    Ouvrez votre menu dans un autre onglet pour voir le changement de thème s'appliquer en direct pendant que vous cliquez ci-dessus.
+  </p>
+  <a class="btn btn-outline-secondary" href="{{ url_for('public_menu', slug=restaurant.slug) }}" target="_blank">
+    <i class="bi bi-eye me-1"></i>Voir mon menu public actuel
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var saveUrl = "{{ url_for('admin_appearance_save') }}";
+
+  document.querySelectorAll(".mf-theme-radio").forEach(function (radio) {
+    radio.addEventListener("change", function () {
+      var card = radio.closest("label").querySelector(".mf-theme-card");
+
+      document.querySelectorAll(".mf-theme-card").forEach(function (c) {
+        c.classList.remove("selected");
+      });
+      card.classList.add("selected");
+
+      var colors = {
+        accent: card.dataset.accent,
+        accent_dark: card.dataset.accentDark,
+        accent_light: card.dataset.accentLight
+      };
+      if (window.MFApplyTheme) window.MFApplyTheme(colors);
+
+      var formData = new FormData();
+      formData.append("theme", radio.value);
+
+      fetch(saveUrl, {
+        method: "POST",
+        headers: { "X-Requested-With": "fetch" },
+        body: formData
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.ok && window.MFShowToast) {
+            window.MFShowToast("Thème « " + card.querySelector("strong").textContent + " » appliqué.", false);
+          } else if (!data.ok && window.MFShowToast) {
+            window.MFShowToast(data.error || "Impossible d'appliquer ce thème.", true);
+          }
+        })
+        .catch(function () {
+          if (window.MFShowToast) window.MFShowToast("Impossible d'enregistrer le thème. Vérifiez votre connexion.", true);
+        });
+    });
+  });
+});
+</script>
+{% endblock %}

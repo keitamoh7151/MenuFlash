@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Créer mon compte — MenuFlash Mini</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='landing.css') }}">
+</head>
+<body class="mf-landing-body">
+
+  <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1080;" id="toast-container"></div>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <script id="flash-data" type="application/json">{{ messages|tojson }}</script>
+    {% endif %}
+  {% endwith %}
+
+  <nav class="mf-landing-nav">
+    <div class="container d-flex align-items-center justify-content-between py-3">
+      <a href="{{ url_for('landing') }}" class="mf-landing-brand">
+        <i class="bi bi-qr-code-scan"></i> MenuFlash <span>Mini</span>
+      </a>
+      <a href="{{ url_for('admin_login') }}" class="btn btn-outline-light btn-sm">Déjà un compte ? Se connecter</a>
+    </div>
+  </nav>
+
+  <main class="mf-signup-wrap">
+    <div class="container" style="max-width: 560px;">
+      <div class="mf-signup-card">
+        <div class="text-center mb-4">
+          <i class="bi bi-rocket-takeoff" style="font-size: 1.8rem; color: var(--mf-accent);"></i>
+          <h1 class="h4 fw-bold mt-2 mb-1">Créez votre compte</h1>
+          <p class="text-secondary small mb-0">7 jours d'essai gratuit, sans carte bancaire.</p>
+        </div>
+
+        <form method="post" id="signup-form" novalidate>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          <div class="mb-3">
+            <label class="form-label small fw-semibold">Nom de votre restaurant</label>
+            <input type="text" name="restaurant_name" id="restaurant-name-input" class="form-control" maxlength="120"
+                   placeholder="Ex : Chez Awa" value="{{ form_values.restaurant_name if form_values else '' }}" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label small fw-semibold">Adresse de votre menu</label>
+            <div class="input-group">
+              <span class="input-group-text mf-signup-url-prefix">menuflash.app/m/</span>
+              <input type="text" name="slug" id="slug-input" class="form-control" maxlength="80"
+                     placeholder="chez-awa" value="{{ form_values.slug if form_values else '' }}">
+            </div>
+            <div class="form-text" id="slug-feedback">Laissez vide pour générer automatiquement à partir du nom.</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label small fw-semibold">Email de connexion</label>
+            <input type="email" name="email" class="form-control" maxlength="120" placeholder="vous@restaurant.com"
+                   value="{{ form_values.email if form_values else '' }}" required>
+            <div class="form-text">Un email de confirmation vous sera envoyé à cette adresse.</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label small fw-semibold">Mot de passe</label>
+            <input type="password" name="password" class="form-control" placeholder="8 caractères minimum" minlength="8" required>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label small fw-semibold">Téléphone (optionnel)</label>
+            <input type="tel" name="phone" class="form-control" maxlength="30" placeholder="Pour que vos clients vous contactent"
+                   value="{{ form_values.phone if form_values else '' }}">
+          </div>
+
+          <button type="submit" class="btn btn-primary w-100 py-2">
+            <i class="bi bi-check-circle-fill me-1"></i>Créer mon compte gratuitement
+          </button>
+          <p class="text-center text-secondary small mt-3 mb-0">
+            En créant un compte, vous acceptez de recevoir des informations liées à votre essai gratuit.
+          </p>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script>
+    (function () {
+      var nameInput = document.getElementById("restaurant-name-input");
+      var slugInput = document.getElementById("slug-input");
+      var feedback = document.getElementById("slug-feedback");
+      var slugEditedManually = false;
+      var checkTimer = null;
+
+      function slugifyClientSide(value) {
+        return value
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase().trim()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, "");
+      }
+
+      function checkSlug(value) {
+        if (!value) {
+          feedback.textContent = "Laissez vide pour générer automatiquement à partir du nom.";
+          feedback.className = "form-text";
+          return;
+        }
+        fetch("/inscription/verifier-slug?slug=" + encodeURIComponent(value))
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.available) {
+              feedback.textContent = "✓ Disponible : menuflash.app/m/" + data.slug;
+              feedback.className = "form-text text-success";
+            } else {
+              feedback.textContent = "Déjà pris — un identifiant proche vous sera proposé automatiquement.";
+              feedback.className = "form-text text-warning";
+            }
+          })
+          .catch(function () {});
+      }
+
+      nameInput.addEventListener("input", function () {
+        if (!slugEditedManually) {
+          slugInput.value = slugifyClientSide(nameInput.value);
+          clearTimeout(checkTimer);
+          checkTimer = setTimeout(function () { checkSlug(slugInput.value); }, 300);
+        }
+      });
+
+      slugInput.addEventListener("input", function () {
+        slugEditedManually = true;
+        slugInput.value = slugifyClientSide(slugInput.value);
+        clearTimeout(checkTimer);
+        checkTimer = setTimeout(function () { checkSlug(slugInput.value); }, 300);
+      });
+
+      if (slugInput.value) checkSlug(slugInput.value);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Codes QR — {{ restaurant.name }}{% endblock %}
+{% block content %}
+{% include "_admin_navbar.html" %}
+
+<div class="container py-4" style="max-width: 1040px;">
+  <div class="alert alert-light border d-flex gap-2 mb-4">
+    <i class="bi bi-info-circle-fill flex-shrink-0 mt-1" style="color: var(--mf-accent);"></i>
+    <div>
+      <strong>Le menu affiché est toujours le même, peu importe le QR scanné.</strong>
+      Créer plusieurs codes QR ne sert qu'à savoir d'où viennent vos clients
+      (quelle table, quelle terrasse) grâce au compteur de scans — ce n'est
+      jamais obligatoire. Si vous préférez, imprimez un seul QR générique
+      et collez-le sur toutes vos tables : tout fonctionnera normalement.
+    </div>
+  </div>
+
+  <div class="card mf-section-card mb-4">
+    <div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-3">QR code général (menu principal)</h2>
+      <p class="small text-secondary">Ce code ne correspond à aucune table précise : utile pour l'entrée du restaurant, un dépliant, vos réseaux sociaux — ou pour toutes vos tables si vous ne voulez pas les distinguer.</p>
+      <div class="mf-qr-card p-3 d-flex flex-wrap align-items-center justify-content-between gap-3">
+        <div>
+          <strong>Menu principal</strong>
+          <div class="small text-secondary">/m/{{ restaurant.slug }}</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-outline-secondary btn-sm mf-copy-btn" data-copy-text="{{ url_for('public_menu', slug=restaurant.slug, _external=True) }}">
+            <i class="bi bi-clipboard me-1"></i>Copier le lien
+          </button>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('menu_qrcode', slug=restaurant.slug) }}">Image PNG</a>
+          <a class="btn btn-primary btn-sm" href="{{ url_for('menu_qrcode_pdf', slug=restaurant.slug) }}"><i class="bi bi-file-earmark-pdf me-1"></i>Chevalet PDF</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mf-section-card mb-4">
+    <div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-3">Ajouter un code QR pour une table (optionnel)</h2>
+      <p class="small text-secondary">À utiliser uniquement si vous voulez distinguer vos tables dans les statistiques de scan. Le menu reste identique partout.</p>
+      <form method="post" action="{{ url_for('admin_qrcodes_add') }}" class="d-flex gap-2 flex-wrap">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="label" class="form-control" maxlength="50" style="max-width: 280px;" placeholder="Ex : Table 5, Terrasse 2…" required>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Créer le QR code</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card mf-section-card">
+    <div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-3">Codes QR par table</h2>
+      {% if qrcodes %}
+        {% for qr in qrcodes %}
+          <div class="mf-qr-card p-3 d-flex flex-wrap align-items-center justify-content-between gap-3 mb-2">
+            <div>
+              <strong>{{ qr.label }}</strong>
+              <div>
+                <span class="badge rounded-pill mf-scan-badge">
+                  <i class="bi bi-eye-fill me-1"></i>{{ qr.scan_count or 0 }} scan{{ 's' if (qr.scan_count or 0) != 1 else '' }}
+                </span>
+              </div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button class="btn btn-outline-secondary btn-sm mf-copy-btn"
+                      data-copy-text="{{ url_for('public_menu', slug=restaurant.slug, qr=qr.id, _external=True) }}">
+                <i class="bi bi-clipboard me-1"></i>Copier
+              </button>
+              <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('table_qrcode_png', slug=restaurant.slug, qr_id=qr.id) }}">Image PNG</a>
+              <a class="btn btn-primary btn-sm" href="{{ url_for('table_qrcode_pdf', slug=restaurant.slug, qr_id=qr.id) }}"><i class="bi bi-file-earmark-pdf me-1"></i>Chevalet PDF</a>
+              <form method="post" action="{{ url_for('admin_qrcodes_delete', qr_id=qr.id) }}"
+                    class="mf-confirm d-inline" data-confirm-message="Supprimer ce QR code ?">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm border-0"><i class="bi bi-trash3"></i></button>
+              </form>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="text-secondary small mb-0">Aucun QR code de table créé pour l'instant.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

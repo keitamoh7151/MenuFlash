@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Historique — {{ restaurant.name }}{% endblock %}
+{% block content %}
+{% include "_admin_navbar.html" %}
+
+<div class="container py-4" style="max-width: 900px;">
+  <div class="alert alert-light border small mb-4">
+    <i class="bi bi-info-circle-fill me-1" style="color: var(--mf-accent);"></i>
+    Historique des modifications apportées au menu du restaurant actuellement actif (ajouts, suppressions,
+    modifications, disponibilité, pauses de catégorie, suggestions de vente additionnelle, logo).
+    Les 200 dernières actions sont affichées. Le réarrangement par glisser-déposer n'est pas journalisé.
+  </div>
+
+  <div class="card mf-section-card">
+    <div class="card-body">
+      {% if logs %}
+        <div class="mf-history-list">
+          {% for log in logs %}
+            <div class="mf-history-row">
+              <div class="mf-history-icon mf-history-{{ log.action }}">
+                {% if log.action == 'item_added' %}<i class="bi bi-plus-circle-fill"></i>
+                {% elif log.action == 'item_deleted' %}<i class="bi bi-trash3-fill"></i>
+                {% elif log.action == 'item_edited' %}<i class="bi bi-pencil-square"></i>
+                {% elif log.action == 'item_toggled' %}<i class="bi bi-toggle2-on"></i>
+                {% elif log.action == 'category_added' %}<i class="bi bi-folder-plus"></i>
+                {% elif log.action == 'category_edited' %}<i class="bi bi-pencil-square"></i>
+                {% elif log.action == 'category_paused' %}<i class="bi bi-pause-circle-fill"></i>
+                {% elif log.action == 'category_resumed' %}<i class="bi bi-play-circle-fill"></i>
+                {% elif log.action == 'logo_updated' %}<i class="bi bi-image-fill"></i>
+                {% elif log.action == 'logo_removed' %}<i class="bi bi-image"></i>
+                {% else %}<i class="bi bi-dot"></i>{% endif %}
+              </div>
+              <div class="flex-grow-1">
+                <p class="mb-0">{{ log.description }}</p>
+                <p class="small text-secondary mb-0">
+                  {{ log.created_at.strftime('%d/%m/%Y %H:%M') }}
+                  {% if log.user_email %} · {{ log.user_email }}{% endif %}
+                </p>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="text-secondary small mb-0">Aucune modification enregistrée pour l'instant.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
