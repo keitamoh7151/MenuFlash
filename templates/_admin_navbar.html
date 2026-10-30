@@ -57,9 +57,8 @@
             <a class="btn btn-sm position-relative {{ 'btn-primary' if request.endpoint == 'admin_orders' else 'btn-outline-secondary' }}"
                href="{{ url_for('admin_orders') }}">
               <i class="bi bi-receipt-cutoff me-1"></i>Commandes
-              {% if nav_active_orders_count %}
-                <span class="badge rounded-pill bg-danger ms-1">{{ nav_active_orders_count }}</span>
-              {% endif %}
+              <span id="nav-orders-badge"
+      class="badge rounded-pill bg-danger ms-1 {{ '' if nav_active_orders_count else 'd-none' }}">{{ nav_active_orders_count }}</span>
             </a>
           </li>
 
@@ -124,4 +123,7 @@
     {% endif %}
   </div>
 </nav>
+{% if request.endpoint != 'admin_orders' %}
+  <div id="mf-order-watcher" data-url="{{ url_for('admin_orders_counter') }}" class="visually-hidden"></div>
+{% endif %}
 {% include "_new_restaurant_modal.html" %}

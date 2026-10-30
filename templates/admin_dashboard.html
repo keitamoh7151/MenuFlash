@@ -16,13 +16,15 @@
     </div>
   {% endif %}
 
-  {% if active_orders_count %}
-    <div class="alert d-flex align-items-center gap-2 mf-animate-in" style="background: var(--mf-accent-light); color: var(--mf-accent-dark);">
-      <i class="bi bi-receipt-cutoff"></i>
-      Vous avez {{ active_orders_count }} commande{{ 's' if active_orders_count != 1 else '' }} en cours.
-      <a href="{{ url_for('admin_orders') }}" class="fw-bold ms-auto">Voir les commandes →</a>
-    </div>
-  {% endif %}
+  <div id="mf-orders-banner"
+     class="alert d-flex align-items-center gap-2 mf-animate-in {{ '' if active_orders_count else 'd-none' }}"
+     style="background: var(--mf-accent-light); color: var(--mf-accent-dark);">
+  <i class="bi bi-receipt-cutoff"></i>
+  <span id="mf-orders-banner-text">
+    Vous avez {{ active_orders_count }} commande{{ 's' if active_orders_count != 1 else '' }} en cours.
+  </span>
+  <a href="{{ url_for('admin_orders') }}" class="fw-bold ms-auto">Voir les commandes →</a>
+</div>
 
   <div class="alert alert-light border small mb-4">
     <i class="bi bi-arrows-move me-1"></i>
@@ -123,7 +125,7 @@
                       <form method="post" action="{{ url_for('toggle_item', item_id=item.id) }}" class="d-inline">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-sm mf-pill-toggle border-0"
-                                style="background-color: {{ '#E2F3EA' if item.is_available else '#F8E0DD' }}; color: {{ '#2E7D5B' if item.is_available else '#C4453A' }};">
+                                 type="submit" class="btn btn-sm mf-pill-toggle border-0 {{ 'mf-pill-on' if item.is_available else 'mf-pill-off' }}">
                           <i class="bi {{ 'bi-check-circle-fill' if item.is_available else 'bi-x-circle-fill' }} me-1"></i>
                           {{ 'Disponible' if item.is_available else 'Épuisé' }}
                         </button>

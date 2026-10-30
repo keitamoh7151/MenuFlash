@@ -1801,6 +1801,27 @@ def admin_orders_feed():
     data = [_order_feed_dict(o, now) for o in orders]
     return jsonify({"orders": data, "count": len(data)})
 
+@app.route("/admin/commandes/compteur.json")
+@login_required
+def admin_orders_counter():
+    """
+    Point de contrôle ultra-léger, interrogé périodiquement par toutes les
+    pages du back-office (sauf la page Commandes, qui a déjà le temps réel
+    SSE). Renvoie le nombre de commandes en cours et l'identifiant de la
+    dernière commande, pour détecter une nouvelle commande sans garder de
+    connexion ouverte en permanence.
+    """
+    restaurant_id = active_restaurant_id()
+    count = Order.query.filter_by(restaurant_id=restaurant_id).filter(
+        Order.status.in_(["nouvelle", "en_preparation", "prete"])
+    ).count()
+    latest = (Order.query.filter_by(restaurant_id=restaurant_id)
+              .order_by(Order.id.desc()).first())
+    return jsonify({
+        "count": count,
+        "latest_id": latest.id if latest else 0,
+        "latest_table": (latest.table_label or "Sans table") if latest else None,
+    })
 
 @app.route("/admin/commandes/stream")
 @login_required

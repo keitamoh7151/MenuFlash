@@ -1021,6 +1021,90 @@
     });
   }
 
+    /* ------------------------------------------------------------------
+     SURVEILLANCE DES COMMANDES sur toutes les pages du back-office (hors
+     page Commandes, qui a son propre temps réel SSE). Interroge un point
+     de contrôle léger toutes les 8 s (30 s si l'onglet est en arrière-
+     plan) et, à chaque nouvelle commande : son + notification + mise à
+     jour du badge et du bandeau, sans recharger la page.
+     ------------------------------------------------------------------ */
+  function escapeHtml(text) {
+    return String(text == null ? "" : text)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function initGlobalOrderWatcher() {
+    var el = document.getElementById("mf-order-watcher");
+    if (!el) return;
+
+    var url = el.dataset.url;
+    var storageKey = "mf_last_order_id";
+    var badge = document.getElementById("nav-orders-badge");
+    var banner = document.getElementById("mf-orders-banner");
+    var bannerText = document.getElementById("mf-orders-banner-text");
+    var timer = null;
+    var lastId = null;
+
+    try {
+      var stored = sessionStorage.getItem(storageKey);
+      if (stored !== null) lastId = parseInt(stored, 10);
+    } catch (e) {}
+
+    function render(count) {
+      if (badge) {
+        badge.textContent = count;
+        badge.classList.toggle("d-none", count === 0);
+      }
+      if (banner && bannerText) {
+        bannerText.textContent = "Vous avez " + count + " commande" + (count > 1 ? "s" : "") + " en cours.";
+        banner.classList.toggle("d-none", count === 0);
+      }
+    }
+
+    function poll() {
+      fetch(url, { cache: "no-store", headers: { "X-Requested-With": "fetch" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data) return;
+          render(data.count);
+
+          if (lastId !== null && data.latest_id > lastId) {
+            playNotificationSound();
+            showToast(
+              "🆕 Nouvelle commande · " + escapeHtml(data.latest_table) +
+              ' — <a href="/admin/commandes" class="fw-bold">Voir</a>',
+              false
+            );
+            if (badge) {
+              badge.classList.remove("mf-pop");
+              void badge.offsetWidth;
+              badge.classList.add("mf-pop");
+            }
+          }
+
+          lastId = data.latest_id;
+          try { sessionStorage.setItem(storageKey, String(lastId)); } catch (e) {}
+        })
+        .catch(function () { /* réseau indisponible : on réessaiera */ });
+    }
+
+    function schedule() {
+      clearInterval(timer);
+      timer = setInterval(poll, document.hidden ? 30000 : 8000);
+    }
+
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) poll();
+      schedule();
+    });
+
+    poll();
+    schedule();
+    initGlobalOrderWatcher();
+    initThemeLiveSync();
+  }
+
   function initThemeLiveSync() {
     var el = document.getElementById("theme-sync-root") || document.getElementById("public-theme-sync-root");
     if (!el || typeof EventSource === "undefined") return;
