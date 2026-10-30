@@ -427,7 +427,25 @@ a:hover { color: var(--mf-ink); }
 }
 
 .mf-pill-toggle { border-radius: 20px; font-weight: 600; font-size: 0.8rem; }
-
+/* États du bouton de disponibilité d'un plat (Disponible / Épuisé).
+   On passe par les variables Bootstrap pour que les couleurs restent
+   correctes aussi au survol et au clic. */
+.mf-pill-on {
+  --bs-btn-bg: var(--mf-success-bg);
+  --bs-btn-color: var(--mf-success);
+  --bs-btn-hover-bg: #CDEBDB;
+  --bs-btn-hover-color: var(--mf-success);
+  --bs-btn-active-bg: #CDEBDB;
+  --bs-btn-active-color: var(--mf-success);
+}
+.mf-pill-off {
+  --bs-btn-bg: var(--mf-danger-bg);
+  --bs-btn-color: var(--mf-danger);
+  --bs-btn-hover-bg: #F2CCC7;
+  --bs-btn-hover-color: var(--mf-danger);
+  --bs-btn-active-bg: #F2CCC7;
+  --bs-btn-active-color: var(--mf-danger);
+}
 .mf-qr-card { background: var(--mf-bg); border-radius: var(--bs-border-radius); }
 .mf-scan-badge { background: var(--mf-accent-light); color: var(--mf-accent-dark); font-weight: 700; }
 
