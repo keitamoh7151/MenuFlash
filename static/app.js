@@ -1101,8 +1101,6 @@
 
     poll();
     schedule();
-    initGlobalOrderWatcher();
-    initThemeLiveSync();
   }
 
   function initThemeLiveSync() {
@@ -1191,6 +1189,8 @@
     initKitchenPolling();
     initCopyButtons();
     initPaymentModal();
+    initGlobalOrderWatcher();
     initThemeLiveSync();
   });
 })();
+

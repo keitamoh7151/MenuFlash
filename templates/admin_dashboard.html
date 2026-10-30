@@ -124,8 +124,7 @@
                     <td>
                       <form method="post" action="{{ url_for('toggle_item', item_id=item.id) }}" class="d-inline">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-sm mf-pill-toggle border-0"
-                                 type="submit" class="btn btn-sm mf-pill-toggle border-0 {{ 'mf-pill-on' if item.is_available else 'mf-pill-off' }}">
+                        <button type="submit" class="btn btn-sm mf-pill-toggle border-0 {{ 'mf-pill-on' if item.is_available else 'mf-pill-off' }}">
                           <i class="bi {{ 'bi-check-circle-fill' if item.is_available else 'bi-x-circle-fill' }} me-1"></i>
                           {{ 'Disponible' if item.is_available else 'Épuisé' }}
                         </button>
@@ -289,3 +288,4 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% endblock %}
+
