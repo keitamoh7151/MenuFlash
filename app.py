@@ -1809,9 +1809,14 @@ def admin_orders_stream():
     q = realtime.subscribe(restaurant_id)
 
     def event_stream():
+        import time
+        started = time.time()
         try:
             yield "retry: 3000\n\n"
-            while True:
+            # Ferme le flux après 5 minutes : le navigateur se reconnecte
+            # automatiquement, ce qui libère les connexions abandonnées
+            # (onglets fermés, téléphones en veille).
+            while time.time() - started < 300:
                 try:
                     message = q.get(timeout=15)
                     yield realtime.format_sse(message)
