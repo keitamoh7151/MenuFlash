@@ -26,9 +26,9 @@
 </head>
 <body class="{{ body_class|default('') }}">
 
-{% if current_user.is_authenticated and not current_user.is_super_admin and request.endpoint == 'admin_orders' %}
-  <div id="theme-sync-root" data-stream-url="{{ url_for('admin_orders_stream') }}" class="visually-hidden"></div>
-{% endif %}
+  {% if current_user.is_authenticated and not current_user.is_super_admin and request.endpoint == 'admin_orders' %}
+    <div id="theme-sync-root" data-stream-url="{{ url_for('admin_orders_stream') }}" class="visually-hidden"></div>
+  {% endif %}
 
   {% if current_user.is_authenticated and not current_user.is_super_admin and not current_user.email_verified %}
     <div class="mf-security-banner">
@@ -73,7 +73,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
   <script src="{{ url_for('static', filename='app.js') }}?v=3"></script>
+  <script src="{{ url_for('static', filename='orders_cleanup.js') }}?v=1"></script>
   {% block extra_scripts %}{% endblock %}
 </body>
 </html>
-

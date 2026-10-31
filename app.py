@@ -18,14 +18,11 @@ Menu affiché par QR code + commande en ligne (sans paiement en ligne).
   plusieurs établissements, et basculer entre eux depuis un sélecteur.
 + IDENTITÉ VISUELLE DU RESTAURANT (marque blanche partielle) : la barre
   de navigation du back-office affiche le NOM et le LOGO du restaurant
-  actif, à la place de la marque "MenuFlash Mini" — seul le panel
-  super-admin et les pages non rattachées à un restaurant (connexion,
-  inscription, mot de passe oublié) gardent la marque de la plateforme.
-+ NAVIGATION RÉORGANISÉE EN MENUS DÉROULANTS : les nombreuses pages du
-  back-office sont regroupées en 3 menus ("Boutique", "Gestion",
-  "Compte") + 2 liens directs ("Menu", "Commandes"), via un unique
-  template partiel (templates/_admin_navbar.html) inclus par toutes les
-  pages — une seule source de vérité pour éviter les divergences.
+  actif, à la place de la marque "MenuFlash Mini".
++ NAVIGATION RÉORGANISÉE EN MENUS DÉROULANTS (templates/_admin_navbar.html).
++ "MES COMMANDES" CÔTÉ CLIENT LIMITÉ À LA VISITE EN COURS : une commande
+  annulée disparaît après 5 min, une commande servie après 30 min, et
+  toute commande disparaît après 12 h (voir CLIENT_ORDER_* ci-dessous).
 
 SÉCURITÉ :
   - Protection CSRF (Flask-WTF) sur tous les formulaires et appels AJAX.
@@ -91,6 +88,14 @@ MIN_PASSWORD_LENGTH = 8
 EMAIL_VERIFY_MAX_AGE = 60 * 60 * 24       # 24 heures
 PASSWORD_RESET_MAX_AGE = 60 * 60          # 1 heure
 MAX_UPSELL_SUGGESTIONS_PER_ITEM = 5
+
+# Visibilité des commandes dans le panneau "Mes commandes" du client.
+# Le délai se compte à partir du dernier changement de statut (updated_at),
+# sauf la durée maximale qui se compte depuis la création de la commande.
+CLIENT_ORDER_CANCELLED_VISIBLE_MINUTES = 5    # commande annulée
+CLIENT_ORDER_SERVED_VISIBLE_MINUTES = 30      # commande servie (temps de laisser un avis)
+CLIENT_ORDER_MAX_AGE_HOURS = 12               # filet de sécurité, quel que soit le statut
+CLIENT_ORDER_MAX_IDS = 50                     # nombre max de commandes interrogées par requête
 
 ORDER_STATUS_FLOW = ["nouvelle", "en_preparation", "prete", "servie"]
 EDITABLE_STATUS = "nouvelle"
@@ -272,10 +277,8 @@ def inject_owner_restaurants():
 def inject_nav_active_orders_count():
     """
     Rend `nav_active_orders_count` disponible dans TOUTES les pages du
-    back-office (pas seulement celles qui le calculent explicitement),
-    pour que le lien "Commandes" de la barre de navigation partagée
-    (templates/_admin_navbar.html) puisse toujours afficher le badge de
-    commandes en cours, quelle que soit la page actuellement affichée.
+    back-office, pour que le lien "Commandes" de la barre de navigation
+    partagée puisse toujours afficher le badge de commandes en cours.
     """
     try:
         if current_user.is_authenticated and not current_user.is_super_admin:
@@ -639,11 +642,6 @@ def reset_password(token):
 @app.route("/admin/mot-de-passe", methods=["GET", "POST"])
 @login_required
 def change_password():
-    # Pour le super-admin, il n'y a pas de "restaurant actif" pertinent
-    # (il gère la plateforme, pas un établissement précis) : on garde la
-    # marque MenuFlash Mini sur cette page pour lui, et on bascule sur la
-    # barre de navigation partagée (avec logo/nom du restaurant) pour les
-    # gestionnaires et cuisiniers.
     restaurant = None if current_user.is_super_admin else active_restaurant()
 
     if request.method == "GET":
@@ -711,12 +709,7 @@ def allowed_file(filename):
 
 
 def save_compressed_image(file_storage, restaurant_slug):
-    """
-    Recompresse une photo de plat (toujours aplatie en RGB — un fond
-    blanc derrière un plat n'a aucun inconvénient visuel, contrairement
-    à un logo). Voir save_logo_image() pour la variante qui préserve la
-    transparence.
-    """
+    """Recompresse une photo de plat (aplatie en RGB, format WEBP)."""
     filename = secure_filename(file_storage.filename)
     if not allowed_file(filename):
         return None
@@ -739,13 +732,8 @@ def save_compressed_image(file_storage, restaurant_slug):
 
 def save_logo_image(file_storage, restaurant_slug):
     """
-    Recompresse un logo de restaurant. Contrairement aux photos de plats,
-    un logo a très souvent un fond transparent (PNG) qu'il est important
-    de préserver — sinon il apparaît avec un carré blanc disgracieux sur
-    la barre de navigation sombre. Si l'image source a un canal alpha
-    (RGBA, LA, ou palette avec transparence), le fichier de sortie reste
-    un PNG avec transparence ; sinon on utilise WEBP (plus léger) comme
-    pour les photos de plats.
+    Recompresse un logo de restaurant en préservant la transparence (PNG)
+    si l'image source en a une ; sinon conversion en WEBP.
     """
     filename = secure_filename(file_storage.filename)
     if not allowed_file(filename):
@@ -847,6 +835,30 @@ def _order_feed_dict(order, now=None):
         "elapsed_minutes": max(int((now - order.created_at).total_seconds() // 60), 0),
         "items": [{"name": it.item_name, "quantity": it.quantity} for it in order.items],
     }
+
+
+def _is_visible_to_client(order, now=None):
+    """
+    Règle d'affichage d'une commande dans le panneau "Mes commandes" du
+    client (la visite en cours, pas un historique) :
+      - plus de CLIENT_ORDER_MAX_AGE_HOURS depuis sa création -> masquée ;
+      - annulée : visible CLIENT_ORDER_CANCELLED_VISIBLE_MINUTES après
+        l'annulation, puis masquée ;
+      - servie : visible CLIENT_ORDER_SERVED_VISIBLE_MINUTES après le
+        service (le temps de laisser un avis), puis masquée ;
+      - nouvelle / en préparation / prête : toujours visible.
+    Le délai se compte depuis le dernier changement de statut (updated_at).
+    """
+    now = now or datetime.utcnow()
+    created = order.created_at or now
+    if created < now - timedelta(hours=CLIENT_ORDER_MAX_AGE_HOURS):
+        return False
+    changed = order.updated_at or created
+    if order.status == "annulee":
+        return changed >= now - timedelta(minutes=CLIENT_ORDER_CANCELLED_VISIBLE_MINUTES)
+    if order.status == "servie":
+        return changed >= now - timedelta(minutes=CLIENT_ORDER_SERVED_VISIBLE_MINUTES)
+    return True
 
 
 def _parse_requested_items(restaurant):
@@ -1185,6 +1197,13 @@ def order_status_json(slug, order_id):
 
 @app.route("/m/<slug>/commandes/etats.json")
 def orders_bulk_status(slug):
+    """
+    Alimente le panneau "Mes commandes" du client. Ne renvoie QUE les
+    commandes encore pertinentes pour la visite en cours (voir
+    _is_visible_to_client). Renvoie aussi `expired_ids` : les numéros que
+    le téléphone peut oublier définitivement (commandes terminées,
+    anciennes, inexistantes ou d'un autre restaurant).
+    """
     restaurant = tenant_or_404(slug)
     ids_param = request.args.get("ids", "")
     ids = []
@@ -1192,16 +1211,28 @@ def orders_bulk_status(slug):
         part = part.strip()
         if part.isdigit():
             ids.append(int(part))
-    ids = ids[:20]
+    # On garde les numéros les plus RÉCENTS (fin de liste) si le téléphone
+    # en a accumulé beaucoup.
+    ids = ids[-CLIENT_ORDER_MAX_IDS:]
 
     if not ids:
-        return jsonify({"orders": []})
+        return jsonify({"orders": [], "expired_ids": []})
 
-    orders = (Order.query
-              .filter(Order.restaurant_id == restaurant.id, Order.id.in_(ids))
-              .order_by(Order.created_at.asc())
-              .all())
-    return jsonify({"orders": [_order_to_dict(o) for o in orders]})
+    now = datetime.utcnow()
+    candidates = (Order.query
+                  .filter(Order.restaurant_id == restaurant.id,
+                          Order.id.in_(ids),
+                          Order.created_at >= now - timedelta(hours=CLIENT_ORDER_MAX_AGE_HOURS))
+                  .order_by(Order.created_at.asc())
+                  .all())
+    visible = [o for o in candidates if _is_visible_to_client(o, now)]
+    visible_ids = {o.id for o in visible}
+    expired_ids = [i for i in ids if i not in visible_ids]
+
+    return jsonify({
+        "orders": [_order_to_dict(o) for o in visible],
+        "expired_ids": expired_ids,
+    })
 
 
 @app.route("/m/<slug>/commande/<int:order_id>/avis", methods=["POST"])
@@ -1801,6 +1832,7 @@ def admin_orders_feed():
     data = [_order_feed_dict(o, now) for o in orders]
     return jsonify({"orders": data, "count": len(data)})
 
+
 @app.route("/admin/commandes/compteur.json")
 @login_required
 def admin_orders_counter():
@@ -1822,6 +1854,7 @@ def admin_orders_counter():
         "latest_id": latest.id if latest else 0,
         "latest_table": (latest.table_label or "Sans table") if latest else None,
     })
+
 
 @app.route("/admin/commandes/stream")
 @login_required
