@@ -174,6 +174,8 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 limiter.exempt(app.view_functions["static"])
+from security_forms import init_form_security
+init_form_security(app, limiter)
 
 
 @app.before_request

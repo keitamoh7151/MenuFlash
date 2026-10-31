@@ -56,13 +56,31 @@
   <div class="card mf-section-card mb-4">
     <div class="card-body">
       <h2 class="mf-section-title fs-6 mb-3">Créer un nouveau restaurant client (manuellement)</h2>
-      <form method="post" action="{{ url_for('super_admin_create_restaurant') }}" class="row g-2">
+      <form method="post" action="{{ url_for('super_admin_create_restaurant') }}" class="row g-2" data-mf-guard autocomplete="off">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="col-md-3"><input type="text" name="name" class="form-control" maxlength="120" placeholder="Nom du restaurant" required></div>
-        <div class="col-md-3"><input type="text" name="slug" class="form-control" maxlength="80" placeholder="slug-url (ex: chez-awa)"></div>
-        <div class="col-md-3"><input type="email" name="owner_email" class="form-control" maxlength="120" placeholder="Email du gestionnaire" required></div>
-        <div class="col-md-2"><input type="password" name="owner_password" class="form-control" placeholder="Mot de passe (8 car. min)" minlength="8" required></div>
-        <div class="col-md-1"><button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus-lg"></i></button></div>
+        <div class="col-md-6">
+          <label for="sa-name" class="form-label small">Nom du restaurant</label>
+          <input type="text" id="sa-name" name="name" class="form-control" minlength="2" maxlength="120" required>
+        </div>
+        <div class="col-md-6">
+          <label for="sa-slug" class="form-label small">Adresse du menu (optionnel)</label>
+          <input type="text" id="sa-slug" name="slug" class="form-control" maxlength="60"
+                 pattern="[a-z0-9\-]*" spellcheck="false" placeholder="ex : chez-awa">
+        </div>
+        <div class="col-md-6">
+          <label for="sa-email" class="form-label small">Email du gestionnaire</label>
+          <input type="email" id="sa-email" name="owner_email" class="form-control" maxlength="120"
+                 autocomplete="off" autocapitalize="off" spellcheck="false" required>
+        </div>
+        <div class="col-md-6">
+          <label for="sa-password" class="form-label small">Mot de passe provisoire</label>
+          <input type="password" id="sa-password" name="owner_password" class="form-control"
+                 data-mf-password="new" autocomplete="new-password"
+                 minlength="{{ PASSWORD_MIN_LENGTH }}" maxlength="{{ PASSWORD_MAX_LENGTH }}" required>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Créer le restaurant</button>
+        </div>
       </form>
     </div>
   </div>
@@ -128,7 +146,7 @@
       </div>
       <div class="modal-body">
         <div class="row g-2">
-          <div class="col-6"><label class="form-label small">Montant (FCFA)</label><input type="number" name="amount" class="form-control" required></div>
+          <div class="col-6"><label class="form-label small">Montant (FCFA)</label><input type="number" name="amount" class="form-control" min="0" max="100000000" step="1" required></div>
           <div class="col-6">
             <label class="form-label small">Méthode</label>
             <select name="method" class="form-select">
@@ -147,7 +165,7 @@
               <option value="basic">Basic</option><option value="pro">Pro</option>
             </select>
           </div>
-          <div class="col-12"><label class="form-label small">Référence (optionnel)</label><input type="text" name="reference" class="form-control" placeholder="ID transaction Mobile Money"></div>
+          <div class="col-12"><label class="form-label small">Référence (optionnel)</label><input type="text" name="reference" class="form-control" maxlength="80" placeholder="ID transaction Mobile Money"></div>
         </div>
       </div>
       <div class="modal-footer border-0">

@@ -18,12 +18,26 @@
   <div class="card mf-section-card mb-4">
     <div class="card-body">
       <h2 class="mf-section-title fs-6 mb-3">Ajouter un compte cuisinier</h2>
-      <form method="post" action="{{ url_for('admin_team_add') }}" class="row g-2">
+      <form method="post" action="{{ url_for('admin_team_add') }}" class="row g-2" data-mf-guard autocomplete="off">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="col-md-4"><input type="text" name="name_note" class="form-control" maxlength="80" placeholder="Nom (optionnel, ex: Fatou)"></div>
-        <div class="col-md-4"><input type="email" name="email" class="form-control" maxlength="120" placeholder="Email de connexion" required></div>
-        <div class="col-md-3"><input type="password" name="password" class="form-control" placeholder="Mot de passe (8 car. min)" minlength="8" required></div>
-        <div class="col-md-1"><button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus-lg"></i></button></div>
+        <div class="col-md-4">
+          <label for="staff-name" class="form-label small">Nom (optionnel)</label>
+          <input type="text" id="staff-name" name="name_note" class="form-control" maxlength="80" autocomplete="off" placeholder="Ex : Fatou">
+        </div>
+        <div class="col-md-4">
+          <label for="staff-email" class="form-label small">Email de connexion</label>
+          <input type="email" id="staff-email" name="email" class="form-control" maxlength="120"
+                 autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email" required>
+        </div>
+        <div class="col-md-4">
+          <label for="staff-password" class="form-label small">Mot de passe</label>
+          <input type="password" id="staff-password" name="password" class="form-control"
+                 data-mf-password="new" autocomplete="new-password"
+                 minlength="{{ PASSWORD_MIN_LENGTH }}" maxlength="{{ PASSWORD_MAX_LENGTH }}" required>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Créer le compte</button>
+        </div>
       </form>
     </div>
   </div>

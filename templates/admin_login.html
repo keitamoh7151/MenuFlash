@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Connexion — MenuFlash Mini{% endblock %}
 {% block content %}
+{% set fv = session.pop('mf_prefill', {}) %}
 <div class="mf-auth-bg">
   <div class="card mf-auth-card p-2">
     <div class="card-body p-4">
@@ -12,15 +13,18 @@
           </h1>
         </a>
       </div>
-      <form method="post">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-floating mb-3">
-          <input type="email" class="form-control" id="email" name="email" placeholder="vous@restaurant.com" required>
-          <label for="email">Adresse email</label>
+      <form method="post" data-mf-guard autocomplete="on">
+        {% include "_form_guard.html" %}
+        <div class="mb-3">
+          <label for="email" class="form-label small fw-semibold">Adresse email</label>
+          <input type="email" class="form-control" id="email" name="email" maxlength="120"
+                 autocomplete="username" autocapitalize="off" spellcheck="false" inputmode="email"
+                 placeholder="vous@restaurant.com" value="{{ fv.email or '' }}" required autofocus>
         </div>
-        <div class="form-floating mb-2">
-          <input type="password" class="form-control" id="password" name="password" placeholder="Mot de passe" required>
-          <label for="password">Mot de passe</label>
+        <div class="mb-2">
+          <label for="password" class="form-label small fw-semibold">Mot de passe</label>
+          <input type="password" class="form-control" id="password" name="password" maxlength="128"
+                 data-mf-password="current" autocomplete="current-password" required>
         </div>
         <div class="text-end mb-3">
           <a href="{{ url_for('forgot_password') }}" class="small">Mot de passe oublié ?</a>

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="robots" content="noindex">
   <title>Créer mon compte — MenuFlash Mini</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -11,8 +12,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3">
   <link rel="stylesheet" href="{{ url_for('static', filename='landing.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='forms_security.css') }}?v=1">
 </head>
 <body class="mf-landing-body">
 
@@ -22,6 +24,8 @@
       <script id="flash-data" type="application/json">{{ messages|tojson }}</script>
     {% endif %}
   {% endwith %}
+
+  {% set fv = form_values or session.pop('mf_prefill', {}) %}
 
   <nav class="mf-landing-nav">
     <div class="container d-flex align-items-center justify-content-between py-3">
@@ -41,41 +45,55 @@
           <p class="text-secondary small mb-0">7 jours d'essai gratuit, sans carte bancaire.</p>
         </div>
 
-        <form method="post" id="signup-form" novalidate>
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <form method="post" id="signup-form" data-mf-guard autocomplete="on">
+          {% include "_form_guard.html" %}
 
           <div class="mb-3">
-            <label class="form-label small fw-semibold">Nom de votre restaurant</label>
-            <input type="text" name="restaurant_name" id="restaurant-name-input" class="form-control" maxlength="120"
-                   placeholder="Ex : Chez Awa" value="{{ form_values.restaurant_name if form_values else '' }}" required>
+            <label for="restaurant-name-input" class="form-label small fw-semibold">Nom de votre restaurant</label>
+            <input type="text" name="restaurant_name" id="restaurant-name-input" class="form-control"
+                   minlength="2" maxlength="120" autocomplete="organization"
+                   placeholder="Ex : Chez Awa" value="{{ fv.restaurant_name or '' }}" required>
           </div>
 
           <div class="mb-3">
-            <label class="form-label small fw-semibold">Adresse de votre menu</label>
+            <label for="slug-input" class="form-label small fw-semibold">Adresse de votre menu</label>
             <div class="input-group">
               <span class="input-group-text mf-signup-url-prefix">menuflash.app/m/</span>
-              <input type="text" name="slug" id="slug-input" class="form-control" maxlength="80"
-                     placeholder="chez-awa" value="{{ form_values.slug if form_values else '' }}">
+              <input type="text" name="slug" id="slug-input" class="form-control" maxlength="60"
+                     pattern="[a-z0-9\-]*" autocomplete="off" spellcheck="false"
+                     placeholder="chez-awa" value="{{ fv.slug or '' }}">
             </div>
             <div class="form-text" id="slug-feedback">Laissez vide pour générer automatiquement à partir du nom.</div>
           </div>
 
           <div class="mb-3">
-            <label class="form-label small fw-semibold">Email de connexion</label>
-            <input type="email" name="email" class="form-control" maxlength="120" placeholder="vous@restaurant.com"
-                   value="{{ form_values.email if form_values else '' }}" required>
+            <label for="email-input" class="form-label small fw-semibold">Email de connexion</label>
+            <input type="email" name="email" id="email-input" class="form-control" maxlength="120"
+                   autocomplete="email" autocapitalize="off" spellcheck="false" inputmode="email"
+                   placeholder="vous@restaurant.com" value="{{ fv.email or '' }}" required>
             <div class="form-text">Un email de confirmation vous sera envoyé à cette adresse.</div>
           </div>
 
           <div class="mb-3">
-            <label class="form-label small fw-semibold">Mot de passe</label>
-            <input type="password" name="password" class="form-control" placeholder="8 caractères minimum" minlength="8" required>
+            <label for="password-input" class="form-label small fw-semibold">Mot de passe</label>
+            <input type="password" name="password" id="password-input" class="form-control"
+                   data-mf-password="new" autocomplete="new-password"
+                   minlength="{{ PASSWORD_MIN_LENGTH }}" maxlength="{{ PASSWORD_MAX_LENGTH }}"
+                   placeholder="{{ PASSWORD_MIN_LENGTH }} caractères minimum" required>
+          </div>
+
+          <div class="mb-3">
+            <label for="password-confirm-input" class="form-label small fw-semibold">Confirmer le mot de passe</label>
+            <input type="password" name="password_confirm" id="password-confirm-input" class="form-control"
+                   data-mf-password="current" data-mf-confirm="password-input" autocomplete="new-password"
+                   maxlength="{{ PASSWORD_MAX_LENGTH }}" required>
           </div>
 
           <div class="mb-4">
-            <label class="form-label small fw-semibold">Téléphone (optionnel)</label>
-            <input type="tel" name="phone" class="form-control" maxlength="30" placeholder="Pour que vos clients vous contactent"
-                   value="{{ form_values.phone if form_values else '' }}">
+            <label for="phone-input" class="form-label small fw-semibold">Téléphone (optionnel)</label>
+            <input type="tel" name="phone" id="phone-input" class="form-control" maxlength="30"
+                   autocomplete="tel" inputmode="tel" pattern="[0-9+\-() ]*"
+                   placeholder="Ex : +223 70 00 00 00" value="{{ fv.phone or '' }}">
           </div>
 
           <button type="submit" class="btn btn-primary w-100 py-2">
@@ -90,13 +108,14 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=3"></script>
+  <script src="{{ url_for('static', filename='forms_security.js') }}?v=1"></script>
   <script>
     (function () {
       var nameInput = document.getElementById("restaurant-name-input");
       var slugInput = document.getElementById("slug-input");
       var feedback = document.getElementById("slug-feedback");
-      var slugEditedManually = false;
+      var slugEditedManually = slugInput.value !== "";
       var checkTimer = null;
 
       function slugifyClientSide(value) {
@@ -105,7 +124,8 @@
           .toLowerCase().trim()
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/-+/g, "-")
-          .replace(/^-|-$/g, "");
+          .replace(/^-|-$/g, "")
+          .slice(0, 60);
       }
 
       function checkSlug(value) {

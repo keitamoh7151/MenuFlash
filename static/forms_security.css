@@ -1,0 +1,19 @@
+/* MenuFlash Mini — styles de l'aide à la saisie sécurisée (forms_security.js) */
+.mf-pwd-wrap { position: relative; }
+.mf-pwd-wrap > input { padding-right: 2.6rem; }
+.mf-pwd-wrap.form-floating > input,
+.form-floating > .mf-pwd-wrap > input { padding-right: 2.6rem; }
+.mf-pwd-toggle {
+  position: absolute; top: 50%; right: .55rem; transform: translateY(-50%);
+  border: 0; background: transparent; color: var(--mf-ink-soft, #6B6A66);
+  padding: .25rem .35rem; line-height: 1; z-index: 5;
+}
+.mf-pwd-toggle:hover, .mf-pwd-toggle:focus-visible { color: var(--mf-accent-dark, #B5730F); }
+.mf-pwd-rules { list-style: none; padding: 0; margin: .4rem 0 0; font-size: .78rem; }
+.mf-pwd-rules li { color: var(--mf-ink-soft, #6B6A66); padding-left: 1.3rem; position: relative; margin-bottom: 2px; }
+.mf-pwd-rules li::before { content: "○"; position: absolute; left: .1rem; }
+.mf-pwd-rules li.ok { color: var(--mf-success, #2E7D5B); font-weight: 600; }
+.mf-pwd-rules li.ok::before { content: "✓"; }
+.mf-pwd-hint, .mf-confirm-msg { font-size: .78rem; color: var(--mf-danger, #C4453A); margin-top: .35rem; }
+.mf-caps-warning { font-size: .78rem; color: var(--mf-warning, #B8860B); margin-top: .35rem; }
+.mf-hp { position: absolute !important; left: -10000px !important; top: auto; width: 1px; height: 1px; overflow: hidden; }

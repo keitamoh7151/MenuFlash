@@ -1,0 +1,10 @@
+{# Protection anti-robot invisible : jeton CSRF + jeton horodaté signé + champ
+   piège. Les vrais utilisateurs ne voient et ne remplissent jamais le champ
+   « website » ; les robots qui remplissent tous les champs sont refusés.
+   Vérifié côté serveur par security_forms.py. #}
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="form_ts" value="{{ form_timestamp() }}">
+<div class="mf-hp" aria-hidden="true">
+  <label for="mf-website">Ne pas remplir ce champ</label>
+  <input type="text" id="mf-website" name="website" tabindex="-1" autocomplete="off" value="">
+</div>
