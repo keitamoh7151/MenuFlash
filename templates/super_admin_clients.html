@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Clients — Super-admin{% endblock %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 1180px;">
+
+  <div class="card mf-section-card mb-3"><div class="card-body">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label small" for="q">Recherche</label>
+        <input type="search" id="q" name="q" value="{{ q }}" class="form-control" placeholder="Nom, adresse du menu ou email" maxlength="80">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small" for="statut">Statut</label>
+        <select id="statut" name="statut" class="form-select">
+          <option value="">Tous (hors archivés)</option>
+          {% for key, val in status_labels.items() %}
+            <option value="{{ key }}" {{ 'selected' if status_filter == key }}>{{ val[0] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small" for="plan">Offre</label>
+        <select id="plan" name="plan" class="form-select">
+          <option value="">Toutes</option>
+          {% for key, val in plan_labels.items() %}<option value="{{ key }}" {{ 'selected' if plan_filter == key }}>{{ val }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small" for="tri">Tri</label>
+        <select id="tri" name="tri" class="form-select">
+          <option value="recent" {{ 'selected' if sort == 'recent' }}>Plus récents</option>
+          <option value="expiration" {{ 'selected' if sort == 'expiration' }}>Expiration proche</option>
+          <option value="nom" {{ 'selected' if sort == 'nom' }}>Nom</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2 d-flex gap-2">
+        <button class="btn btn-primary flex-grow-1" type="submit"><i class="bi bi-search"></i></button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('super_admin_clients_export') }}" title="Exporter (Excel)"><i class="bi bi-download"></i></a>
+      </div>
+    </form>
+  </div></div>
+
+  <div class="card mf-section-card mb-4"><div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+      <h2 class="mf-section-title fs-6 mb-0">{{ rows|length }} client(s)</h2>
+      <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#sa-create">
+        <i class="bi bi-plus-lg me-1"></i>Créer un client manuellement</button>
+    </div>
+
+    <div class="collapse mb-3" id="sa-create">
+      <form method="post" action="{{ url_for('super_admin_create_restaurant') }}" class="row g-2 p-3 rounded mf-sa-soft" data-mf-guard autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-6"><label class="form-label small" for="sa-name">Nom du restaurant</label>
+          <input type="text" id="sa-name" name="name" class="form-control" minlength="2" maxlength="120" required></div>
+        <div class="col-md-6"><label class="form-label small" for="sa-slug">Adresse du menu (optionnel)</label>
+          <input type="text" id="sa-slug" name="slug" class="form-control" maxlength="60" pattern="[a-z0-9\-]*" spellcheck="false"></div>
+        <div class="col-md-6"><label class="form-label small" for="sa-email">Email du gestionnaire</label>
+          <input type="email" id="sa-email" name="owner_email" class="form-control" maxlength="120" autocomplete="off" required></div>
+        <div class="col-md-6"><label class="form-label small" for="sa-password">Mot de passe provisoire</label>
+          <input type="password" id="sa-password" name="owner_password" class="form-control" data-mf-password="new"
+                 autocomplete="new-password" minlength="{{ PASSWORD_MIN_LENGTH }}" maxlength="{{ PASSWORD_MAX_LENGTH }}" required></div>
+        <div class="col-12"><button class="btn btn-primary" type="submit">Créer (essai de {{ trial_days }} jours)</button></div>
+      </form>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="small text-secondary text-uppercase">
+          <tr><th>Restaurant</th><th>Gestionnaire</th><th>Offre</th><th>Statut</th><th>Expire le</th><th>Dernière connexion</th></tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}{% set r = row.r %}
+            <tr>
+              <td><a class="fw-semibold" href="{{ url_for('super_admin_restaurant_detail', restaurant_id=r.id) }}">{{ r.name }}</a>
+                <div class="small text-secondary">/m/{{ r.slug }}</div></td>
+              <td class="small">{{ row.owner.email if row.owner else '—' }}</td>
+              <td class="small">{{ plan_labels.get(r.subscription_plan, r.subscription_plan) }}</td>
+              <td><span class="badge {{ status_labels[row.status][1] }}">{{ status_labels[row.status][0] }}</span></td>
+              <td class="small">{{ r.subscription_active_until.strftime('%d/%m/%Y') if r.subscription_active_until else '—' }}</td>
+              <td class="small text-secondary">{{ row.owner.last_login_at.strftime('%d/%m/%Y %H:%M') if row.owner and row.owner.last_login_at else 'jamais' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="text-secondary small">Aucun client ne correspond à ces critères.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div></div>
+</div>
+{% endblock %}

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Communication — Super-admin{% endblock %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 1180px;">
+  <div class="row g-3">
+    <div class="col-lg-7">
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Publier une annonce dans les tableaux de bord</h2>
+        <form method="post" action="{{ url_for('super_admin_announcement_create') }}" class="row g-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="col-12"><input type="text" name="title" class="form-control" maxlength="120" placeholder="Titre (ex : Nouvelle fonctionnalité)" required></div>
+          <div class="col-12"><textarea name="body" class="form-control" rows="3" maxlength="1000" placeholder="Message" required></textarea></div>
+          <div class="col-4"><select name="level" class="form-select form-select-sm">
+            <option value="info">Information</option><option value="success">Bonne nouvelle</option><option value="warning">Important</option></select></div>
+          <div class="col-4"><select name="target" class="form-select form-select-sm">
+            <option value="all">Tous les restaurants</option><option value="trial">En essai</option><option value="basic">Basic</option><option value="pro">Pro</option></select></div>
+          <div class="col-4"><input type="date" name="ends_at" class="form-control form-control-sm" title="Afficher jusqu'au (optionnel)"></div>
+          <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Publier</button></div>
+        </form>
+        <hr>
+        {% for a in announcements %}
+          {% set live = a.is_active and (not a.ends_at or a.ends_at >= now) %}
+          <div class="d-flex justify-content-between align-items-start border-bottom py-2 gap-2">
+            <div class="small"><strong>{{ a.title }}</strong>
+              <span class="badge {{ 'mf-sa-badge-ok' if live else 'mf-sa-badge-muted' }}">{{ 'En ligne' if live else 'Masquée' }}</span>
+              <div class="text-secondary">{{ a.body }}</div>
+              <div class="text-secondary">Cible : {{ {'all':'tous','trial':'essai','basic':'Basic','pro':'Pro'}[a.target] }}{% if a.ends_at %} · jusqu'au {{ a.ends_at.strftime('%d/%m/%Y') }}{% endif %}</div></div>
+            <div class="d-flex gap-1">
+              <form method="post" action="{{ url_for('super_admin_announcement_toggle', ann_id=a.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-secondary" type="submit" title="Afficher / masquer"><i class="bi bi-eye{{ '-slash' if a.is_active }}"></i></button></form>
+              <form method="post" action="{{ url_for('super_admin_announcement_delete', ann_id=a.id) }}" class="mf-confirm" data-confirm-message="Supprimer cette annonce ?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash3"></i></button></form>
+            </div>
+          </div>
+        {% else %}<p class="small text-secondary mb-0">Aucune annonce.</p>{% endfor %}
+      </div></div>
+
+      <div class="card mf-section-card"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Email groupé aux gestionnaires</h2>
+        <form method="post" action="{{ url_for('super_admin_bulk_email') }}" class="mf-confirm" data-confirm-message="Envoyer cet email à tous les gestionnaires ciblés ?">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <select name="target" class="form-select form-select-sm mb-2">
+            <option value="all">Tous les clients (hors archivés)</option><option value="actif">Clients actifs payants</option>
+            <option value="essai">Clients en essai</option><option value="expire">Clients expirés</option>
+            <option value="basic">Offre Basic</option><option value="pro">Offre Pro</option></select>
+          <input type="text" name="subject" class="form-control mb-2" maxlength="150" placeholder="Objet" required>
+          <textarea name="body" class="form-control mb-2" rows="5" maxlength="5000" placeholder="Message" required></textarea>
+          <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-send me-1"></i>Envoyer</button>
+        </form>
+      </div></div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card mf-section-card {{ 'border-danger' if maintenance_on }}"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Mode maintenance</h2>
+        <p class="small text-secondary">Bloque l'accès aux restaurateurs et aux clients (menus publics) avec un message. Vous gardez l'accès au panel.</p>
+        <form method="post" action="{{ url_for('super_admin_maintenance') }}" class="mf-confirm"
+              data-confirm-message="{{ 'Désactiver' if maintenance_on else 'Activer' }} le mode maintenance ?">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="state" value="{{ 'off' if maintenance_on else 'on' }}">
+          <textarea name="message" class="form-control mb-2" rows="3" maxlength="500">{{ maintenance_message }}</textarea>
+          <button class="btn w-100 {{ 'btn-success' if maintenance_on else 'btn-danger' }}" type="submit">
+            {{ 'Désactiver la maintenance' if maintenance_on else 'Activer la maintenance' }}</button>
+        </form>
+      </div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

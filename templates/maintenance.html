@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Maintenance en cours — MenuFlash Mini{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card text-center p-4" style="max-width: 440px;">
+    <div class="card-body">
+      <i class="bi bi-cone-striped" style="font-size: 2.6rem; color: var(--mf-accent);"></i>
+      <h1 class="h5 fw-bold mt-3 mb-2">Maintenance en cours</h1>
+      <p class="mb-0">{{ message }}</p>
+      {% if current_user.is_authenticated %}
+        <a class="btn btn-link btn-sm mt-3" href="{{ url_for('admin_logout') }}">Se déconnecter</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

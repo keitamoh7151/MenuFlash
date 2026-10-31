@@ -1,0 +1,26 @@
+{# Annonces publiées par le super-admin, affichées en haut du back-office des restaurants. #}
+{% if platform_announcements %}
+  <div class="container pt-3" style="max-width: 1040px;">
+    {% for a in platform_announcements %}
+      <div class="alert alert-{{ 'warning' if a.level == 'warning' else ('success' if a.level == 'success' else 'info') }} alert-dismissible fade show small mb-2 mf-announcement" data-ann-id="{{ a.id }}" role="alert">
+        <i class="bi bi-megaphone-fill me-1"></i><strong>{{ a.title }}</strong> — {{ a.body }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+      </div>
+    {% endfor %}
+  </div>
+  <script>
+  (function () {
+    try {
+      var hidden = JSON.parse(localStorage.getItem("mf_hidden_ann") || "[]");
+      document.querySelectorAll(".mf-announcement").forEach(function (el) {
+        var id = el.dataset.annId;
+        if (hidden.indexOf(id) !== -1) { el.remove(); return; }
+        el.addEventListener("closed.bs.alert", function () {
+          hidden.push(id);
+          localStorage.setItem("mf_hidden_ann", JSON.stringify(hidden.slice(-50)));
+        });
+      });
+    } catch (e) {}
+  })();
+  </script>
+{% endif %}

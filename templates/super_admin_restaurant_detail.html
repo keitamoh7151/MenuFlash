@@ -1,64 +1,247 @@
 {% extends "base.html" %}
-{% block title %}{{ restaurant.name }} — Détail{% endblock %}
+{% block title %}{{ restaurant.name }} — Super-admin{% endblock %}
 {% block content %}
-<nav class="navbar navbar-expand-lg mf-navbar sticky-top">
-  <div class="container-fluid px-3 px-md-4">
-    <span class="navbar-brand d-flex align-items-center gap-2 mb-0">
-      <i class="bi bi-qr-code-scan"></i> MenuFlash<span class="mf-brand-mini">Mini</span> <span class="text-secondary fw-normal small">· {{ restaurant.name }}</span>
-    </span>
-    <div class="d-flex gap-2 flex-wrap">
-      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('super_admin_dashboard') }}"><i class="bi bi-arrow-left me-1"></i>Retour au panel</a>
-      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('public_menu', slug=restaurant.slug) }}">Voir le menu</a>
-    </div>
-  </div>
-</nav>
+{% include "_super_admin_navbar.html" %}
+{% set r = restaurant %}
+<div class="container py-4" style="max-width: 1180px;">
 
-<div class="container py-4" style="max-width: 1040px;">
-  <div class="card mf-section-card mb-4">
-    <div class="card-body">
-      <h2 class="mf-section-title fs-6 mb-3">Informations</h2>
-      <p class="mb-1"><strong>Slug :</strong> /m/{{ restaurant.slug }}</p>
-      <p class="mb-1"><strong>Plan :</strong> {{ restaurant.subscription_plan }}</p>
-      <p class="mb-1"><strong>Thème du menu public :</strong> {{ restaurant.theme_colors.label }}</p>
-      <p class="mb-1"><strong>Abonnement valide jusqu'au :</strong>
-        {{ restaurant.subscription_active_until.strftime('%d/%m/%Y') if restaurant.subscription_active_until else "—" }}
-      </p>
-      <p class="mb-0"><strong>Statut compte :</strong>
-        {% if restaurant.is_active %}
-          <span class="badge" style="background:#E2F3EA; color: #2E7D5B;">Actif</span>
-        {% else %}
-          <span class="badge" style="background:#F8E0DD; color: #C4453A;">Désactivé</span>
-        {% endif %}
-      </p>
+  <div class="d-flex flex-wrap align-items-center gap-3 mb-4">
+    {% if r.logo_url %}<img src="{{ r.logo_url }}" alt="" class="mf-logo-preview" style="width:56px;height:56px;">{% endif %}
+    <div class="flex-grow-1">
+      <h1 class="h4 fw-bold mb-1">{{ r.name }}
+        <span class="badge {{ status_labels[status][1] }} align-middle ms-1">{{ status_labels[status][0] }}</span></h1>
+      <div class="small text-secondary">
+        <a href="{{ url_for('public_menu', slug=r.slug) }}" target="_blank" rel="noopener">/m/{{ r.slug }}</a>
+        · créé le {{ r.created_at.strftime('%d/%m/%Y') if r.created_at else '—' }}
+        · {{ r.phone or 'pas de téléphone' }}
+      </div>
     </div>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('super_admin_clients') }}"><i class="bi bi-arrow-left me-1"></i>Tous les clients</a>
   </div>
 
-  <div class="card mf-section-card">
-    <div class="card-body">
-      <h2 class="mf-section-title fs-6 mb-3">Historique des paiements</h2>
-      {% if payments %}
-        <div class="table-responsive">
-          <table class="table align-middle">
-            <thead class="small text-secondary text-uppercase">
-              <tr><th>Date</th><th>Montant</th><th>Méthode</th><th>Référence</th><th>Mois ajoutés</th></tr>
-            </thead>
-            <tbody>
-              {% for p in payments %}
-                <tr>
-                  <td>{{ p.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
-                  <td class="fw-bold" style="color: var(--mf-accent-dark);">{{ p.amount }} FCFA</td>
-                  <td>{{ p.method }}</td>
-                  <td>{{ p.reference or "—" }}</td>
-                  <td>{{ p.months_added }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+  {% if meta and meta.suspension_reason and not r.is_active %}
+    <div class="alert alert-warning small"><i class="bi bi-pause-circle-fill me-1"></i>
+      <strong>{{ 'Archivé' if meta.archived_at else 'Suspendu' }}</strong>
+      {% if meta.suspended_at %}le {{ meta.suspended_at.strftime('%d/%m/%Y') }}{% endif %} — motif affiché au restaurateur : « {{ meta.suspension_reason }} »</div>
+  {% endif %}
+
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md"><div class="card mf-stat-card p-3 text-center h-100"><div class="mf-stat-num">{{ plan_labels.get(r.subscription_plan, r.subscription_plan) }}</div><div class="small text-secondary">Offre</div></div></div>
+    <div class="col-6 col-md"><div class="card mf-stat-card p-3 text-center h-100"><div class="mf-stat-num fs-5">{{ r.subscription_active_until.strftime('%d/%m/%Y') if r.subscription_active_until else '—' }}</div><div class="small text-secondary">Fin d'abonnement ({{ r.days_remaining }} j)</div></div></div>
+    <div class="col-6 col-md"><div class="card mf-stat-card p-3 text-center h-100"><div class="mf-stat-num">{{ stats.dishes }}</div><div class="small text-secondary">Plats · {{ stats.categories }} catégories</div></div></div>
+    <div class="col-6 col-md"><div class="card mf-stat-card p-3 text-center h-100"><div class="mf-stat-num">{{ stats.orders_30d }}</div><div class="small text-secondary">Commandes 30 j · {{ stats.orders_total }} au total</div></div></div>
+    <div class="col-6 col-md"><div class="card mf-stat-card p-3 text-center h-100"><div class="mf-stat-num fs-5">{{ last_order.created_at.strftime('%d/%m') if last_order else '—' }}</div><div class="small text-secondary">Dernière commande</div></div></div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-7">
+
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h2 class="mf-section-title fs-6 mb-0">Abonnement & paiements</h2>
+          <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#sa-payment-modal"><i class="bi bi-cash-coin me-1"></i>Enregistrer un paiement</button>
         </div>
-      {% else %}
-        <p class="text-secondary small mb-0">Aucun paiement enregistré pour l'instant.</p>
-      {% endif %}
+        {% if payments %}
+          <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+            <thead class="small text-secondary"><tr><th>Date</th><th>Montant</th><th>Méthode</th><th>Mois</th><th>Référence</th><th></th></tr></thead>
+            <tbody>
+            {% for p in payments %}
+              <tr class="small">
+                <td>{{ p.created_at.strftime('%d/%m/%Y') }}</td>
+                <td class="fw-bold">{{ p.amount|fcfa }} FCFA</td>
+                <td>{{ p.method }}</td><td>{{ p.months_added }}</td>
+                <td class="text-secondary">{{ p.reference or '—' }}</td>
+                <td class="text-end"><a class="btn btn-sm btn-outline-secondary border-0" href="{{ url_for('super_admin_payment_receipt', payment_id=p.id) }}" title="Reçu PDF"><i class="bi bi-file-earmark-pdf"></i></a></td>
+              </tr>
+            {% endfor %}
+            </tbody></table></div>
+        {% else %}<p class="text-secondary small mb-0">Aucun paiement enregistré.</p>{% endif %}
+      </div></div>
+
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Comptes</h2>
+        <table class="table table-sm align-middle mb-0">
+          <thead class="small text-secondary"><tr><th>Email</th><th>Rôle</th><th>Dernière connexion</th><th>État</th></tr></thead>
+          <tbody>
+          {% for u in users %}
+            <tr class="small">
+              <td>{{ u.email }}{% if not u.email_verified %} <span class="badge mf-sa-badge-muted">non vérifié</span>{% endif %}</td>
+              <td>{{ 'Gestionnaire' if u.role == 'owner' else 'Cuisinier' }}</td>
+              <td class="text-secondary">{{ u.last_login_at.strftime('%d/%m/%Y %H:%M') if u.last_login_at else 'jamais' }}</td>
+              <td>{% if u.is_locked %}<span class="badge mf-sa-badge-danger">Verrouillé</span>{% elif u.failed_login_attempts %}<span class="badge mf-sa-badge-warning">{{ u.failed_login_attempts }} échec(s)</span>{% else %}<span class="badge mf-sa-badge-ok">OK</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% if linked %}
+          <p class="small text-secondary mt-3 mb-0"><i class="bi bi-diagram-3 me-1"></i>Restaurants liés (même gestionnaire) :
+            {% for l in linked %}<a href="{{ url_for('super_admin_restaurant_detail', restaurant_id=l.id) }}">{{ l.name }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>
+        {% endif %}
+      </div></div>
+
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Notes internes <span class="small text-secondary fw-normal">(visibles uniquement par vous)</span></h2>
+        <form method="post" action="{{ url_for('super_admin_add_note', restaurant_id=r.id) }}" class="mb-3">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <textarea name="body" class="form-control mb-2" rows="2" maxlength="1000" placeholder="Ex : a promis de payer le 15, préfère être appelé le matin…" required></textarea>
+          <button class="btn btn-sm btn-primary" type="submit">Ajouter la note</button>
+        </form>
+        {% for n in notes %}
+          <div class="mf-sa-note">
+            <div class="small">{{ n.body }}</div>
+            <div class="d-flex justify-content-between align-items-center">
+              <span class="small text-secondary">{{ n.created_at.strftime('%d/%m/%Y %H:%M') }} · {{ n.author_email }}</span>
+              <form method="post" action="{{ url_for('super_admin_delete_note', note_id=n.id) }}" class="mf-confirm" data-confirm-message="Supprimer cette note ?">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-link text-danger p-0" type="submit"><i class="bi bi-trash3"></i></button>
+              </form>
+            </div>
+          </div>
+        {% else %}<p class="text-secondary small mb-0">Aucune note.</p>{% endfor %}
+      </div></div>
+
+      <div class="card mf-section-card"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Activité récente</h2>
+        {% for log in logs %}
+          <div class="d-flex justify-content-between small border-bottom py-1">
+            <span><span class="{{ 'text-success' if log.success else 'text-danger' }}">{{ '✓' if log.success else '✗' }}</span> {{ log.action }}{% if log.user_email %} — {{ log.user_email }}{% endif %}</span>
+            <span class="text-secondary">{{ log.created_at.strftime('%d/%m %H:%M') }}</span>
+          </div>
+        {% else %}<p class="text-secondary small mb-0">Aucune activité.</p>{% endfor %}
+      </div></div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Actions rapides</h2>
+        {% set act = url_for('super_admin_restaurant_action', restaurant_id=r.id) %}
+
+        <form method="post" action="{{ act }}" class="d-flex gap-2 mb-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="add_days">
+          <input type="number" name="days" class="form-control form-control-sm" min="1" max="365" value="7" aria-label="Jours">
+          <button class="btn btn-sm btn-outline-secondary text-nowrap" type="submit"><i class="bi bi-gift me-1"></i>Offrir des jours</button>
+        </form>
+
+        <form method="post" action="{{ act }}" class="d-flex gap-2 mb-3">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="change_plan">
+          <select name="plan" class="form-select form-select-sm" aria-label="Offre">
+            {% for k, v in plan_labels.items() %}<option value="{{ k }}" {{ 'selected' if r.subscription_plan == k }}>{{ v }}</option>{% endfor %}
+          </select>
+          <button class="btn btn-sm btn-outline-secondary text-nowrap" type="submit">Changer l'offre</button>
+        </form>
+
+        <div class="d-grid gap-2 mb-3">
+          {% for action, icon, label, msg in [
+            ('unlock', 'unlock', 'Débloquer les comptes', 'Débloquer tous les comptes verrouillés de ce restaurant ?'),
+            ('send_reset', 'envelope', 'Envoyer un lien de réinitialisation', 'Envoyer un lien de réinitialisation du mot de passe au gestionnaire ?'),
+            ('force_logout', 'box-arrow-right', 'Forcer la déconnexion', 'Fermer toutes les sessions ouvertes de ce restaurant ?')] %}
+            <form method="post" action="{{ act }}" class="mf-confirm" data-confirm-message="{{ msg }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="{{ action }}">
+              <button class="btn btn-sm btn-outline-secondary w-100 text-start" type="submit"><i class="bi bi-{{ icon }} me-2"></i>{{ label }}</button>
+            </form>
+          {% endfor %}
+        </div>
+
+        <form method="post" action="{{ act }}" class="mb-3 mf-confirm" data-confirm-message="Transférer la propriété ? L'ancien email ne pourra plus se connecter.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="transfer">
+          <label class="form-label small">Transférer la propriété à un nouvel email</label>
+          <div class="d-flex gap-2">
+            <input type="email" name="new_email" class="form-control form-control-sm" maxlength="120" required autocomplete="off">
+            <button class="btn btn-sm btn-outline-secondary" type="submit">Transférer</button>
+          </div>
+        </form>
+
+        <hr>
+        {% if r.is_active %}
+          <form method="post" action="{{ act }}" class="mb-2 mf-confirm" data-confirm-message="Suspendre ce restaurant ? Son menu et son tableau de bord seront bloqués.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="suspend">
+            <label class="form-label small">Suspendre (motif visible par le restaurateur)</label>
+            <input type="text" name="reason" class="form-control form-control-sm mb-2" maxlength="300" placeholder="Ex : abonnement impayé depuis le 1er novembre" required>
+            <button class="btn btn-sm btn-outline-danger w-100" type="submit"><i class="bi bi-pause-circle me-1"></i>Suspendre</button>
+          </form>
+        {% else %}
+          <form method="post" action="{{ act }}" class="mb-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="reactivate">
+            <button class="btn btn-sm btn-success w-100" type="submit"><i class="bi bi-play-circle me-1"></i>Réactiver</button>
+          </form>
+        {% endif %}
+      </div></div>
+
+      <div class="card mf-section-card border-danger-subtle"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3 text-danger">Fermeture du compte</h2>
+        <a class="btn btn-sm btn-outline-secondary w-100 mb-2" href="{{ url_for('super_admin_restaurant_export', restaurant_id=r.id) }}"><i class="bi bi-download me-1"></i>Exporter toutes ses données (JSON)</a>
+        {% if not (meta and meta.archived_at) %}
+          <form method="post" action="{{ act }}" class="mf-confirm" data-confirm-message="Archiver ce restaurant ? Il sera bloqué et masqué de la liste.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="archive">
+            <button class="btn btn-sm btn-outline-danger w-100" type="submit"><i class="bi bi-archive me-1"></i>Archiver</button>
+          </form>
+          <p class="small text-secondary mt-2 mb-0">La suppression définitive n'est possible qu'après archivage.</p>
+        {% else %}
+          <form method="post" action="{{ url_for('super_admin_restaurant_delete', restaurant_id=r.id) }}" class="mf-confirm" data-confirm-message="Suppression DÉFINITIVE de toutes les données. Continuer ?">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label class="form-label small">Tapez <code>{{ r.slug }}</code> pour confirmer</label>
+            <input type="text" name="confirm_slug" class="form-control form-control-sm mb-2" autocomplete="off" required>
+            <button class="btn btn-sm btn-danger w-100" type="submit"><i class="bi bi-trash3 me-1"></i>Supprimer définitivement</button>
+          </form>
+        {% endif %}
+      </div></div>
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="sa-payment-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form method="post" action="{{ url_for('super_admin_record_payment', restaurant_id=r.id) }}" class="modal-content" id="sa-payment-form"
+          data-price-basic="{{ price_basic }}" data-price-pro="{{ price_pro }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header border-0"><h5 class="modal-title">Paiement — {{ r.name }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body"><div class="row g-2">
+        <div class="col-6"><label class="form-label small">Offre</label>
+          <select name="plan" class="form-select" data-sa-calc>
+            <option value="basic" {{ 'selected' if r.subscription_plan != 'pro' }}>Basic ({{ price_basic|fcfa }}/mois)</option>
+            <option value="pro" {{ 'selected' if r.subscription_plan == 'pro' }}>Pro ({{ price_pro|fcfa }}/mois)</option>
+          </select></div>
+        <div class="col-6"><label class="form-label small">Durée</label>
+          <select name="months" class="form-select" data-sa-calc>
+            <option value="1">1 mois</option><option value="3">3 mois</option><option value="6">6 mois</option><option value="12">12 mois</option>
+          </select></div>
+        <div class="col-6"><label class="form-label small">Code promo</label>
+          <select name="promo_code" class="form-select" data-sa-calc>
+            <option value="" data-pct="0">Aucun</option>
+            {% for p in promos %}<option value="{{ p.code }}" data-pct="{{ p.percent_off }}">{{ p.code }} (-{{ p.percent_off }} %)</option>{% endfor %}
+          </select></div>
+        <div class="col-6"><label class="form-label small">Méthode</label>
+          <select name="method" class="form-select"><option>Wave</option><option>Orange Money</option><option>Moov Money</option><option>Espèces</option><option>Virement</option></select></div>
+        <div class="col-12"><label class="form-label small">Montant reçu (FCFA)</label>
+          <input type="number" name="amount" id="sa-amount" class="form-control" min="0" max="100000000" step="1" placeholder="Calculé automatiquement si vide">
+          <div class="form-text" id="sa-amount-hint"></div></div>
+        <div class="col-12"><label class="form-label small">Référence de la transaction</label>
+          <input type="text" name="reference" class="form-control" maxlength="60" placeholder="ID Mobile Money"></div>
+      </div></div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary">Valider le paiement</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var f = document.getElementById("sa-payment-form");
+  if (!f) return;
+  var hint = document.getElementById("sa-amount-hint");
+  function calc() {
+    var plan = f.plan.value, months = parseInt(f.months.value, 10) || 1;
+    var price = parseInt(f.dataset[plan === "pro" ? "pricePro" : "priceBasic"], 10) || 0;
+    var pct = parseInt(f.promo_code.selectedOptions[0].dataset.pct, 10) || 0;
+    var total = Math.round(price * months * (100 - pct) / 100);
+    hint.textContent = "Montant attendu : " + total.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " FCFA";
+  }
+  f.querySelectorAll("[data-sa-calc]").forEach(function (el) { el.addEventListener("change", calc); });
+  calc();
+});
+</script>
 {% endblock %}

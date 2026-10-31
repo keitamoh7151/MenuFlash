@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Relances — Super-admin{% endblock %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 1040px;">
+  <div class="card mf-section-card"><div class="card-body">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+      <div>
+        <h2 class="mf-section-title fs-6 mb-1">Abonnements à relancer</h2>
+        <p class="small text-secondary mb-0">Expirent dans les 7 prochains jours ou ont expiré depuis moins de 30 jours.</p>
+      </div>
+      {% if rows %}
+      <form method="post" action="{{ url_for('super_admin_reminders_send') }}" class="mf-confirm" data-confirm-message="Envoyer un rappel à tous les restaurants de cette liste ?">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-send me-1"></i>Rappeler tout le monde ({{ rows|length }})</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="table-responsive"><table class="table align-middle mb-0">
+      <thead class="small text-secondary text-uppercase"><tr><th>Restaurant</th><th>Gestionnaire</th><th>Échéance</th><th></th></tr></thead>
+      <tbody>
+      {% for row in rows %}{% set r = row.r %}
+        <tr>
+          <td><a class="fw-semibold" href="{{ url_for('super_admin_restaurant_detail', restaurant_id=r.id) }}">{{ r.name }}</a>
+            <div class="small text-secondary">{{ plan_labels.get(r.subscription_plan, r.subscription_plan) }}</div></td>
+          <td class="small">{% for o in row.owners %}{{ o.email }}<br>{% endfor %}</td>
+          <td class="small">{{ r.subscription_active_until.strftime('%d/%m/%Y') }}
+            {% if row.days < 0 %}<span class="badge mf-sa-badge-danger">expiré depuis {{ -row.days }} j</span>
+            {% else %}<span class="badge mf-sa-badge-warning">dans {{ row.days }} j</span>{% endif %}</td>
+          <td class="text-end">
+            <form method="post" action="{{ url_for('super_admin_reminders_send') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="restaurant_id" value="{{ r.id }}">
+              <button class="btn btn-sm btn-outline-secondary" type="submit"><i class="bi bi-envelope me-1"></i>Rappeler</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}<tr><td colspan="4" class="small text-secondary">Rien à relancer pour le moment.</td></tr>{% endfor %}
+      </tbody></table></div>
+  </div></div>
+</div>
+{% endblock %}

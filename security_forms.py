@@ -218,7 +218,7 @@ def check_form_guard(form, secret, min_seconds=0):
 _AUTH_ENDPOINTS = {
     "signup", "admin_login", "forgot_password", "reset_password",
     "change_password", "admin_team", "admin_team_add",
-    "super_admin_dashboard", "super_admin_create_restaurant",
+    "super_admin_dashboard", "super_admin_clients", "super_admin_create_restaurant",
 }
 
 
@@ -388,7 +388,7 @@ def _super_admin_create(form, secret):
 # Routes POST-only : en cas d'erreur, on renvoie vers la page du formulaire.
 _REDIRECT_TO = {
     "admin_team_add": "admin_team",
-    "super_admin_create_restaurant": "super_admin_dashboard",
+    "super_admin_create_restaurant": "super_admin_clients",
 }
 
 _HANDLERS = {
@@ -400,3 +400,4 @@ _HANDLERS = {
     "admin_team_add": _team_add,
     "super_admin_create_restaurant": _super_admin_create,
 }
+

@@ -26,6 +26,8 @@ Menu affiché par QR code + commande en ligne (sans paiement en ligne).
 + "MES COMMANDES" CÔTÉ CLIENT LIMITÉ À LA VISITE EN COURS : une commande
   annulée disparaît après 5 min, une commande servie après 30 min, et
   toute commande disparaît après 12 h (voir CLIENT_ORDER_* ci-dessous).
++ PANEL SUPER-ADMIN COMPLET (super_admin.py) : pilotage, gestion des
+  clients, finances, relances, communication, maintenance, santé.
 
 SÉCURITÉ :
   - Protection CSRF (Flask-WTF) sur tous les formulaires et appels AJAX.
@@ -78,6 +80,7 @@ from stats_utils import build_dashboard_stats
 from i18n import TRANSLATIONS
 import realtime
 from mailer import init_mailer, send_transactional_email
+from super_admin import init_super_admin, get_trial_days
 from media_store import StoredImage, ensure_media_table, store_image, delete_stored_image
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -453,7 +456,7 @@ def signup():
         slug=slug,
         phone=phone or None,
         subscription_plan="trial",
-        subscription_active_until=datetime.utcnow() + timedelta(days=TRIAL_DAYS),
+        subscription_active_until=datetime.utcnow() + timedelta(days=get_trial_days()),
     )
     db.session.add(restaurant)
     db.session.commit()
@@ -469,7 +472,7 @@ def signup():
 
     login_user(owner)
     flash(
-        f"Bienvenue sur MenuFlash Mini ! Votre essai gratuit de {TRIAL_DAYS} jours a commencé. "
+        f"Bienvenue sur MenuFlash Mini ! Votre essai gratuit de {get_trial_days()} jours a commencé. "
         f"Votre menu est accessible à l'adresse /m/{slug}. Pensez à confirmer votre email "
         f"(lien envoyé à {owner_email}), et à ajouter le logo de votre restaurant depuis "
         f"la page Apparence.",
@@ -511,7 +514,7 @@ def admin_restaurants_new():
     restaurant = Restaurant(
         name=name, slug=slug,
         subscription_plan="trial",
-        subscription_active_until=datetime.utcnow() + timedelta(days=TRIAL_DAYS),
+        subscription_active_until=datetime.utcnow() + timedelta(days=get_trial_days()),
     )
     db.session.add(restaurant)
     db.session.commit()
@@ -525,7 +528,7 @@ def admin_restaurants_new():
 
     session["active_restaurant_id"] = restaurant.id
     flash(
-        f"Restaurant « {name} » créé avec un essai gratuit de {TRIAL_DAYS} jours. "
+        f"Restaurant « {name} » créé avec un essai gratuit de {get_trial_days()} jours. "
         f"Vous pouvez maintenant y ajouter votre menu.",
         "success",
     )
@@ -1941,129 +1944,9 @@ def admin_order_cancel(order_id):
 
 
 # --------------------------------------------------------------------------
-# PANEL SUPER-ADMIN — réservé à toi : gestion globale des restaurants clients
+# PANEL SUPER-ADMIN : toutes les routes sont dans super_admin.py
+# (branchées en bas de ce fichier par init_super_admin).
 # --------------------------------------------------------------------------
-@app.route("/super-admin")
-@super_admin_required
-def super_admin_dashboard():
-    restaurants = Restaurant.query.order_by(Restaurant.created_at.desc()).all()
-
-    total = len(restaurants)
-    actifs = sum(1 for r in restaurants if r.is_subscription_valid)
-    expires_bientot = sum(
-        1 for r in restaurants
-        if r.is_subscription_valid and r.days_remaining <= 5
-    )
-    expires = total - actifs
-
-    return render_template(
-        "super_admin_dashboard.html",
-        restaurants=restaurants,
-        total=total, actifs=actifs, expires=expires, expires_bientot=expires_bientot,
-    )
-
-
-@app.route("/super-admin/restaurants/new", methods=["POST"])
-@super_admin_required
-def super_admin_create_restaurant():
-    name = request.form.get("name", "").strip()[:120]
-    slug = slugify(request.form.get("slug", "").strip()[:80] or name)
-    owner_email = request.form.get("owner_email", "").strip().lower()[:120]
-    owner_password = request.form.get("owner_password", "")
-
-    if not name or not owner_email or len(owner_password) < MIN_PASSWORD_LENGTH:
-        flash(f"Tous les champs sont requis (mot de passe : {MIN_PASSWORD_LENGTH} caractères min.).", "error")
-        return redirect(url_for("super_admin_dashboard"))
-
-    if not slug_is_available(slug):
-        flash("Ce slug est déjà utilisé par un autre restaurant.", "error")
-        return redirect(url_for("super_admin_dashboard"))
-    if User.query.filter_by(email=owner_email).first():
-        flash("Cet email est déjà utilisé par un autre compte.", "error")
-        return redirect(url_for("super_admin_dashboard"))
-
-    restaurant = Restaurant(
-        name=name, slug=slug,
-        subscription_plan="trial",
-        subscription_active_until=datetime.utcnow() + timedelta(days=TRIAL_DAYS),
-    )
-    db.session.add(restaurant)
-    db.session.commit()
-
-    owner = User(restaurant_id=restaurant.id, email=owner_email, role="owner")
-    owner.set_password(owner_password)
-    db.session.add(owner)
-    db.session.commit()
-
-    log_audit("super_admin_restaurant_created", restaurant_id=restaurant.id,
-               user_email=current_user.email, details=f"restaurant « {name} » créé par le super-admin")
-    flash(f"Restaurant « {name} » créé avec un essai gratuit de {TRIAL_DAYS} jours.", "success")
-    return redirect(url_for("super_admin_dashboard"))
-
-
-@app.route("/super-admin/restaurants/<int:restaurant_id>/payment", methods=["POST"])
-@super_admin_required
-def super_admin_record_payment(restaurant_id):
-    restaurant = Restaurant.query.get_or_404(restaurant_id)
-
-    amount = safe_int(request.form.get("amount"), min_value=0, max_value=100_000_000)
-    method = request.form.get("method", "Non précisé")[:30]
-    reference = request.form.get("reference", "").strip()[:80]
-    months = safe_int(request.form.get("months"), default=1, min_value=1, max_value=36)
-
-    if amount is None:
-        flash("Montant invalide.", "error")
-        return redirect(url_for("super_admin_dashboard"))
-
-    base_date = restaurant.subscription_active_until
-    if not base_date or base_date < datetime.utcnow():
-        base_date = datetime.utcnow()
-    restaurant.subscription_active_until = base_date + timedelta(days=30 * months)
-    restaurant.subscription_plan = request.form.get("plan", restaurant.subscription_plan)[:20]
-    restaurant.is_active = True
-
-    db.session.add(SubscriptionPayment(
-        restaurant_id=restaurant.id,
-        amount=amount,
-        method=method,
-        reference=reference,
-        months_added=months,
-        recorded_by=current_user.id,
-    ))
-    db.session.commit()
-
-    log_audit("super_admin_payment_recorded", restaurant_id=restaurant.id,
-               user_email=current_user.email,
-               details=f"{amount} FCFA, {months} mois, méthode={method}")
-    flash(f"Paiement enregistré : {restaurant.name} est actif jusqu'au "
-          f"{restaurant.subscription_active_until.strftime('%d/%m/%Y')}.", "success")
-    return redirect(url_for("super_admin_dashboard"))
-
-
-@app.route("/super-admin/restaurants/<int:restaurant_id>/toggle", methods=["POST"])
-@super_admin_required
-def super_admin_toggle_restaurant(restaurant_id):
-    restaurant = Restaurant.query.get_or_404(restaurant_id)
-    restaurant.is_active = not restaurant.is_active
-    db.session.commit()
-    log_audit("super_admin_restaurant_toggled", restaurant_id=restaurant.id,
-               user_email=current_user.email,
-               details=f"restaurant {'activé' if restaurant.is_active else 'désactivé'}")
-    flash(f"{restaurant.name} est maintenant "
-          f"{'actif' if restaurant.is_active else 'désactivé'}.", "success")
-    return redirect(url_for("super_admin_dashboard"))
-
-
-@app.route("/super-admin/restaurants/<int:restaurant_id>")
-@super_admin_required
-def super_admin_restaurant_detail(restaurant_id):
-    restaurant = Restaurant.query.get_or_404(restaurant_id)
-    payments = (SubscriptionPayment.query
-                .filter_by(restaurant_id=restaurant.id)
-                .order_by(SubscriptionPayment.created_at.desc())
-                .all())
-    return render_template("super_admin_restaurant_detail.html",
-                            restaurant=restaurant, payments=payments)
 
 
 def _ensure_column(conn, table, column, ddl_type_default):
@@ -2105,9 +1988,22 @@ def _ensure_security_defaults():
         db.session.rollback()
 
 
+init_super_admin(
+    app,
+    log_audit=log_audit,
+    send_password_reset_email=send_password_reset_email,
+    super_admin_required=super_admin_required,
+    slugify=slugify,
+    slug_is_available=slug_is_available,
+    safe_int=safe_int,
+    min_password_length=MIN_PASSWORD_LENGTH,
+)
+
+
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
         _ensure_schema_migrations()
         _ensure_security_defaults()
     app.run(debug=True, port=5000, host="0.0.0.0", threaded=True)
+

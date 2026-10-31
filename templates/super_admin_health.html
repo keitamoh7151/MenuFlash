@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Santé technique — Super-admin{% endblock %}
+{% macro size(b) %}{% if b is none %}—{% elif b < 1048576 %}{{ '%.0f' % (b / 1024) }} Ko{% else %}{{ '%.1f' % (b / 1048576) }} Mo{% endif %}{% endmacro %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 1180px;">
+  <div class="row g-3 mb-3">
+    {% for label, value in counts.items() %}
+      <div class="col-6 col-md-3 col-lg"><div class="card mf-stat-card p-3 text-center h-100">
+        <div class="mf-stat-num">{{ value|fcfa }}</div><div class="small text-secondary">{{ label }}</div></div></div>
+    {% endfor %}
+  </div>
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Stockage</h2>
+        <div class="d-flex justify-content-between small border-bottom py-2"><span>État de la base</span>
+          <span class="badge {{ 'mf-sa-badge-ok' if db_ok else 'mf-sa-badge-danger' }}">{{ 'Connectée' if db_ok else 'Erreur' }}</span></div>
+        <div class="d-flex justify-content-between small border-bottom py-2"><span>Taille de la base</span><strong>{{ size(db_size) }}</strong></div>
+        <div class="d-flex justify-content-between small py-2"><span>Dont images (logos, photos)</span><strong>{{ size(images_bytes) }}</strong></div>
+        <p class="small text-secondary mt-2 mb-0">La base gratuite de Render est limitée à 1 Go : surveillez cette valeur.</p>
+      </div></div>
+      <div class="card mf-section-card"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Environnement</h2>
+        {% for k, v in env.items() %}
+          <div class="d-flex justify-content-between small border-bottom py-2"><span>{{ k }}</span>
+            <strong class="{{ 'text-danger' if v in ('NON configuré', 'ACTIF', 'non') }}">{{ v }}</strong></div>
+        {% endfor %}
+        <div class="d-flex justify-content-between small py-2"><span>En ligne depuis</span>
+          <strong>{{ uptime.days }} j {{ (uptime.seconds // 3600) }} h {{ (uptime.seconds // 60) % 60 }} min</strong></div>
+      </div></div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card mf-section-card"><div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h2 class="mf-section-title fs-6 mb-0">Dernières erreurs de l'application</h2>
+          {% if errors %}
+          <form method="post" action="{{ url_for('super_admin_errors_clear') }}" class="mf-confirm" data-confirm-message="Effacer toutes les erreurs enregistrées ?">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-secondary" type="submit">Tout effacer</button></form>
+          {% endif %}
+        </div>
+        {% for e in errors %}
+          <details class="mf-sa-error mb-2">
+            <summary class="small"><strong class="text-danger">{{ e.error_type }}</strong> · {{ e.method }} {{ e.path }}
+              <span class="text-secondary">· {{ e.created_at.strftime('%d/%m %H:%M') }}{% if e.user_email %} · {{ e.user_email }}{% endif %}</span></summary>
+            <div class="small mt-1">{{ e.message }}</div>
+            <pre class="small mt-2 mb-0">{{ e.trace }}</pre>
+          </details>
+        {% else %}<p class="small text-secondary mb-0"><i class="bi bi-check-circle-fill text-success me-1"></i>Aucune erreur enregistrée.</p>{% endfor %}
+      </div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

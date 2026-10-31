@@ -1,4 +1,4 @@
-
+﻿
 ==================== app.py ====================
 """
 MenuFlash Mini — point d'entrée Flask
@@ -20,14 +20,14 @@ Menu affiché par QR code + commande en ligne (sans paiement en ligne).
   plusieurs établissements, et basculer entre eux depuis un sélecteur.
 + IDENTITÉ VISUELLE DU RESTAURANT (marque blanche partielle) : la barre
   de navigation du back-office affiche le NOM et le LOGO du restaurant
-  actif, à la place de la marque "MenuFlash Mini" — seul le panel
-  super-admin et les pages non rattachées à un restaurant (connexion,
-  inscription, mot de passe oublié) gardent la marque de la plateforme.
-+ NAVIGATION RÉORGANISÉE EN MENUS DÉROULANTS : les nombreuses pages du
-  back-office sont regroupées en 3 menus ("Boutique", "Gestion",
-  "Compte") + 2 liens directs ("Menu", "Commandes"), via un unique
-  template partiel (templates/_admin_navbar.html) inclus par toutes les
-  pages — une seule source de vérité pour éviter les divergences.
+  actif, à la place de la marque "MenuFlash Mini".
++ NAVIGATION RÉORGANISÉE EN MENUS DÉROULANTS (templates/_admin_navbar.html).
++ IMAGES PERMANENTES : logos et photos de plats sont stockés dans la base
+  de données (voir media_store.py) au lieu du disque du serveur, qui est
+  effacé à chaque redéploiement / mise en veille sur Render.
++ "MES COMMANDES" CÔTÉ CLIENT LIMITÉ À LA VISITE EN COURS : une commande
+  annulée disparaît après 5 min, une commande servie après 30 min, et
+  toute commande disparaît après 12 h (voir CLIENT_ORDER_* ci-dessous).
 
 SÉCURITÉ :
   - Protection CSRF (Flask-WTF) sur tous les formulaires et appels AJAX.
@@ -80,6 +80,7 @@ from stats_utils import build_dashboard_stats
 from i18n import TRANSLATIONS
 import realtime
 from mailer import init_mailer, send_transactional_email
+from media_store import StoredImage, ensure_media_table, store_image, delete_stored_image
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
@@ -93,6 +94,14 @@ MIN_PASSWORD_LENGTH = 8
 EMAIL_VERIFY_MAX_AGE = 60 * 60 * 24       # 24 heures
 PASSWORD_RESET_MAX_AGE = 60 * 60          # 1 heure
 MAX_UPSELL_SUGGESTIONS_PER_ITEM = 5
+
+# Visibilité des commandes dans le panneau "Mes commandes" du client.
+# Le délai se compte à partir du dernier changement de statut (updated_at),
+# sauf la durée maximale qui se compte depuis la création de la commande.
+CLIENT_ORDER_CANCELLED_VISIBLE_MINUTES = 5    # commande annulée
+CLIENT_ORDER_SERVED_VISIBLE_MINUTES = 30      # commande servie (temps de laisser un avis)
+CLIENT_ORDER_MAX_AGE_HOURS = 12               # filet de sécurité, quel que soit le statut
+CLIENT_ORDER_MAX_IDS = 50                     # nombre max de commandes interrogées par requête
 
 ORDER_STATUS_FLOW = ["nouvelle", "en_preparation", "prete", "servie"]
 EDITABLE_STATUS = "nouvelle"
@@ -152,6 +161,7 @@ app.config["MAIL_PASSWORD"] = os.environ.get("MAIL_PASSWORD", "")
 app.config["MAIL_DEFAULT_SENDER"] = os.environ.get("MAIL_DEFAULT_SENDER", "no-reply@menuflash.local")
 
 db.init_app(app)
+ensure_media_table(app)
 init_mailer(app)
 
 login_manager = LoginManager(app)
@@ -166,6 +176,8 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 limiter.exempt(app.view_functions["static"])
+from security_forms import init_form_security
+init_form_security(app, limiter)
 
 
 @app.before_request
@@ -274,10 +286,8 @@ def inject_owner_restaurants():
 def inject_nav_active_orders_count():
     """
     Rend `nav_active_orders_count` disponible dans TOUTES les pages du
-    back-office (pas seulement celles qui le calculent explicitement),
-    pour que le lien "Commandes" de la barre de navigation partagée
-    (templates/_admin_navbar.html) puisse toujours afficher le badge de
-    commandes en cours, quelle que soit la page actuellement affichée.
+    back-office, pour que le lien "Commandes" de la barre de navigation
+    partagée puisse toujours afficher le badge de commandes en cours.
     """
     try:
         if current_user.is_authenticated and not current_user.is_super_admin:
@@ -641,11 +651,6 @@ def reset_password(token):
 @app.route("/admin/mot-de-passe", methods=["GET", "POST"])
 @login_required
 def change_password():
-    # Pour le super-admin, il n'y a pas de "restaurant actif" pertinent
-    # (il gère la plateforme, pas un établissement précis) : on garde la
-    # marque MenuFlash Mini sur cette page pour lui, et on bascule sur la
-    # barre de navigation partagée (avec logo/nom du restaurant) pour les
-    # gestionnaires et cuisiniers.
     restaurant = None if current_user.is_super_admin else active_restaurant()
 
     if request.method == "GET":
@@ -712,12 +717,12 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
 
-def save_compressed_image(file_storage, restaurant_slug):
+def save_compressed_image(file_storage, restaurant_slug, restaurant_id=None):
     """
-    Recompresse une photo de plat (toujours aplatie en RGB — un fond
-    blanc derrière un plat n'a aucun inconvénient visuel, contrairement
-    à un logo). Voir save_logo_image() pour la variante qui préserve la
-    transparence.
+    Recompresse une photo de plat (aplatie en RGB, format WEBP) et
+    l'enregistre dans la base de données (stockage permanent, voir
+    media_store.py). Renvoie l'URL /media/<id>, ou None si le fichier
+    n'est pas une image valide.
     """
     filename = secure_filename(file_storage.filename)
     if not allowed_file(filename):
@@ -733,21 +738,17 @@ def save_compressed_image(file_storage, restaurant_slug):
 
     img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
 
-    out_name = f"{restaurant_slug}_{int(datetime.utcnow().timestamp())}.webp"
-    out_path = os.path.join(UPLOAD_DIR, out_name)
-    img.save(out_path, "WEBP", quality=70)
-    return f"/static/uploads/{out_name}"
+    buf = io.BytesIO()
+    img.save(buf, "WEBP", quality=70)
+    return store_image(buf.getvalue(), "image/webp", kind="photo", restaurant_id=restaurant_id)
 
 
-def save_logo_image(file_storage, restaurant_slug):
+def save_logo_image(file_storage, restaurant_slug, restaurant_id=None):
     """
-    Recompresse un logo de restaurant. Contrairement aux photos de plats,
-    un logo a très souvent un fond transparent (PNG) qu'il est important
-    de préserver — sinon il apparaît avec un carré blanc disgracieux sur
-    la barre de navigation sombre. Si l'image source a un canal alpha
-    (RGBA, LA, ou palette avec transparence), le fichier de sortie reste
-    un PNG avec transparence ; sinon on utilise WEBP (plus léger) comme
-    pour les photos de plats.
+    Recompresse un logo de restaurant en préservant la transparence (PNG)
+    si l'image source en a une ; sinon conversion en WEBP. Le logo est
+    enregistré dans la base de données (stockage permanent) : il ne
+    disparaît plus lors d'un redéploiement ou d'une mise en veille.
     """
     filename = secure_filename(file_storage.filename)
     if not allowed_file(filename):
@@ -765,16 +766,27 @@ def save_logo_image(file_storage, restaurant_slug):
 
     img.thumbnail((MAX_LOGO_SIDE, MAX_LOGO_SIDE))
 
-    timestamp = int(datetime.utcnow().timestamp())
+    buf = io.BytesIO()
     if has_alpha:
-        out_name = f"{restaurant_slug}-logo_{timestamp}.png"
-        out_path = os.path.join(UPLOAD_DIR, out_name)
-        img.save(out_path, "PNG", optimize=True)
+        img.save(buf, "PNG", optimize=True)
+        mimetype = "image/png"
     else:
-        out_name = f"{restaurant_slug}-logo_{timestamp}.webp"
-        out_path = os.path.join(UPLOAD_DIR, out_name)
-        img.save(out_path, "WEBP", quality=85)
-    return f"/static/uploads/{out_name}"
+        img.save(buf, "WEBP", quality=85)
+        mimetype = "image/webp"
+    return store_image(buf.getvalue(), mimetype, kind="logo", restaurant_id=restaurant_id)
+
+
+@app.route("/media/<int:image_id>")
+def media(image_id):
+    """
+    Sert une image stockée en base. Cache navigateur d'un an : une image
+    ne change jamais (un nouveau logo ou une nouvelle photo crée une
+    nouvelle entrée avec un nouvel id).
+    """
+    image = StoredImage.query.get_or_404(image_id)
+    response = Response(image.data, mimetype=image.mimetype)
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return response
 
 
 def tenant_or_404(slug):
@@ -849,6 +861,30 @@ def _order_feed_dict(order, now=None):
         "elapsed_minutes": max(int((now - order.created_at).total_seconds() // 60), 0),
         "items": [{"name": it.item_name, "quantity": it.quantity} for it in order.items],
     }
+
+
+def _is_visible_to_client(order, now=None):
+    """
+    Règle d'affichage d'une commande dans le panneau "Mes commandes" du
+    client (la visite en cours, pas un historique) :
+      - plus de CLIENT_ORDER_MAX_AGE_HOURS depuis sa création -> masquée ;
+      - annulée : visible CLIENT_ORDER_CANCELLED_VISIBLE_MINUTES après
+        l'annulation, puis masquée ;
+      - servie : visible CLIENT_ORDER_SERVED_VISIBLE_MINUTES après le
+        service (le temps de laisser un avis), puis masquée ;
+      - nouvelle / en préparation / prête : toujours visible.
+    Le délai se compte depuis le dernier changement de statut (updated_at).
+    """
+    now = now or datetime.utcnow()
+    created = order.created_at or now
+    if created < now - timedelta(hours=CLIENT_ORDER_MAX_AGE_HOURS):
+        return False
+    changed = order.updated_at or created
+    if order.status == "annulee":
+        return changed >= now - timedelta(minutes=CLIENT_ORDER_CANCELLED_VISIBLE_MINUTES)
+    if order.status == "servie":
+        return changed >= now - timedelta(minutes=CLIENT_ORDER_SERVED_VISIBLE_MINUTES)
+    return True
 
 
 def _parse_requested_items(restaurant):
@@ -1187,6 +1223,13 @@ def order_status_json(slug, order_id):
 
 @app.route("/m/<slug>/commandes/etats.json")
 def orders_bulk_status(slug):
+    """
+    Alimente le panneau "Mes commandes" du client. Ne renvoie QUE les
+    commandes encore pertinentes pour la visite en cours (voir
+    _is_visible_to_client). Renvoie aussi `expired_ids` : les numéros que
+    le téléphone peut oublier définitivement (commandes terminées,
+    anciennes, inexistantes ou d'un autre restaurant).
+    """
     restaurant = tenant_or_404(slug)
     ids_param = request.args.get("ids", "")
     ids = []
@@ -1194,16 +1237,28 @@ def orders_bulk_status(slug):
         part = part.strip()
         if part.isdigit():
             ids.append(int(part))
-    ids = ids[:20]
+    # On garde les numéros les plus RÉCENTS (fin de liste) si le téléphone
+    # en a accumulé beaucoup.
+    ids = ids[-CLIENT_ORDER_MAX_IDS:]
 
     if not ids:
-        return jsonify({"orders": []})
+        return jsonify({"orders": [], "expired_ids": []})
 
-    orders = (Order.query
-              .filter(Order.restaurant_id == restaurant.id, Order.id.in_(ids))
-              .order_by(Order.created_at.asc())
-              .all())
-    return jsonify({"orders": [_order_to_dict(o) for o in orders]})
+    now = datetime.utcnow()
+    candidates = (Order.query
+                  .filter(Order.restaurant_id == restaurant.id,
+                          Order.id.in_(ids),
+                          Order.created_at >= now - timedelta(hours=CLIENT_ORDER_MAX_AGE_HOURS))
+                  .order_by(Order.created_at.asc())
+                  .all())
+    visible = [o for o in candidates if _is_visible_to_client(o, now)]
+    visible_ids = {o.id for o in visible}
+    expired_ids = [i for i in ids if i not in visible_ids]
+
+    return jsonify({
+        "orders": [_order_to_dict(o) for o in visible],
+        "expired_ids": expired_ids,
+    })
 
 
 @app.route("/m/<slug>/commande/<int:order_id>/avis", methods=["POST"])
@@ -1424,7 +1479,7 @@ def add_item():
     photo_url = None
     file = request.files.get("photo")
     if file and file.filename:
-        photo_url = save_compressed_image(file, restaurant.slug)
+        photo_url = save_compressed_image(file, restaurant.slug, restaurant.id)
 
     last = db.session.query(db.func.max(MenuItem.position)).filter_by(
         category_id=category.id).scalar() or 0
@@ -1479,8 +1534,9 @@ def edit_item(item_id):
 
     file = request.files.get("photo")
     if file and file.filename:
-        photo_url = save_compressed_image(file, restaurant.slug)
+        photo_url = save_compressed_image(file, restaurant.slug, restaurant.id)
         if photo_url:
+            delete_stored_image(item.photo_url)
             item.photo_url = photo_url
             changes.append("photo mise à jour")
 
@@ -1543,6 +1599,7 @@ def delete_item(item_id):
     item = MenuItem.query.filter_by(
         id=item_id, restaurant_id=restaurant_id).first_or_404()
     name = item.name
+    delete_stored_image(item.photo_url)
     MenuItemSuggestion.query.filter(
         (MenuItemSuggestion.menu_item_id == item.id) |
         (MenuItemSuggestion.suggested_item_id == item.id)
@@ -1615,11 +1672,12 @@ def admin_appearance_logo():
         flash("Veuillez choisir une image.", "error")
         return redirect(url_for("admin_appearance"))
 
-    logo_url = save_logo_image(file, restaurant.slug)
+    logo_url = save_logo_image(file, restaurant.slug, restaurant.id)
     if not logo_url:
         flash("Format d'image non reconnu. Utilisez un fichier JPG, PNG ou WEBP.", "error")
         return redirect(url_for("admin_appearance"))
 
+    delete_stored_image(restaurant.logo_url)
     restaurant.logo_url = logo_url
     log_menu_change(restaurant.id, current_user, "logo_updated",
                      "Logo du restaurant mis à jour.")
@@ -1633,6 +1691,7 @@ def admin_appearance_logo():
 @owner_required
 def admin_appearance_logo_delete():
     restaurant = active_restaurant()
+    delete_stored_image(restaurant.logo_url)
     restaurant.logo_url = None
     log_menu_change(restaurant.id, current_user, "logo_removed",
                      "Logo du restaurant supprimé.")
@@ -1803,6 +1862,7 @@ def admin_orders_feed():
     data = [_order_feed_dict(o, now) for o in orders]
     return jsonify({"orders": data, "count": len(data)})
 
+
 @app.route("/admin/commandes/compteur.json")
 @login_required
 def admin_orders_counter():
@@ -1824,6 +1884,7 @@ def admin_orders_counter():
         "latest_id": latest.id if latest else 0,
         "latest_table": (latest.table_label or "Sans table") if latest else None,
     })
+
 
 @app.route("/admin/commandes/stream")
 @login_required
@@ -2222,6 +2283,73 @@ def send_transactional_email(app, to, subject, body_text):
             to, subject, body_text,
         )
         return False
+
+
+==================== media_store.py ====================
+"""
+MenuFlash Mini — stockage permanent des images (logos et photos de plats).
+
+POURQUOI : sur Render (et la plupart des hébergeurs), le disque du serveur
+n'est PAS permanent. Tout fichier écrit dans static/uploads disparaît à
+chaque redéploiement, redémarrage ou mise en veille du service. C'est
+pour cela que les logos "disparaissaient après quelque temps".
+
+SOLUTION : les images (déjà recompressées et redimensionnées, donc
+légères : quelques dizaines de Ko) sont enregistrées directement dans la
+base de données PostgreSQL, qui, elle, est permanente. Elles sont servies
+par la route /media/<id>, avec un cache navigateur long (une image ne
+change jamais : un nouveau logo crée une nouvelle image avec un nouvel id).
+
+La table `stored_images` est créée automatiquement au démarrage si elle
+n'existe pas encore (aucune action manuelle nécessaire sur Render).
+"""
+import logging
+from datetime import datetime
+
+from models import db
+
+logger = logging.getLogger("menuflash.media")
+
+MEDIA_URL_PREFIX = "/media/"
+
+
+class StoredImage(db.Model):
+    __tablename__ = "stored_images"
+
+    id = db.Column(db.Integer, primary_key=True)
+    restaurant_id = db.Column(db.Integer, nullable=True, index=True)
+    kind = db.Column(db.String(20), nullable=False, default="photo")   # "logo" ou "photo"
+    mimetype = db.Column(db.String(40), nullable=False)
+    data = db.Column(db.LargeBinary, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+def ensure_media_table(app):
+    """Crée la table stored_images si elle n'existe pas (sans toucher aux autres)."""
+    try:
+        with app.app_context():
+            StoredImage.__table__.create(db.engine, checkfirst=True)
+    except Exception:
+        logger.exception("Impossible de créer la table stored_images")
+
+
+def store_image(data, mimetype, kind="photo", restaurant_id=None):
+    """Enregistre les octets d'une image et renvoie son URL publique (/media/<id>)."""
+    image = StoredImage(restaurant_id=restaurant_id, kind=kind, mimetype=mimetype, data=data)
+    db.session.add(image)
+    db.session.flush()  # attribue l'id sans valider la transaction de l'appelant
+    return f"{MEDIA_URL_PREFIX}{image.id}"
+
+
+def delete_stored_image(url):
+    """Supprime une image stockée en base si l'URL pointe vers /media/<id>. Sans effet sinon."""
+    if not url or not url.startswith(MEDIA_URL_PREFIX):
+        return
+    try:
+        image_id = int(url[len(MEDIA_URL_PREFIX):])
+    except ValueError:
+        return
+    StoredImage.query.filter_by(id=image_id).delete()
 
 
 ==================== models.py ====================
@@ -2759,6 +2887,411 @@ Pillow>=12.2
 gunicorn==22.0.0 
 reportlab==4.4.6
 psycopg2-binary==2.9.10 
+
+
+==================== security_forms.py ====================
+"""
+MenuFlash Mini — sécurité des formulaires (inscription, connexion, mots de passe).
+
+Ce module se branche sur l'application avec deux lignes dans app.py :
+
+    from security_forms import init_form_security
+    init_form_security(app, limiter)
+
+Il vérifie TOUS les formulaires sensibles AVANT que la route ne s'exécute.
+Si une vérification échoue, l'utilisateur est renvoyé sur le formulaire avec
+des messages d'erreur clairs, et la route n'est jamais exécutée.
+
+Mesures appliquées
+------------------
+1. Politique de mot de passe (nouveaux mots de passe uniquement) :
+   - 10 à 64 caractères ;
+   - UNIQUEMENT des lettres non accentuées et des chiffres (aucun espace,
+     aucune ponctuation, aucun accent) ;
+   - au moins une majuscule, une minuscule et un chiffre ;
+   - pas 4 caractères identiques à la suite, pas de suite évidente
+     (123456, abcdef, azerty, qwerty) ;
+   - pas un mot de passe courant (motdepasse, password, admin...) ;
+   - ne contient ni l'identifiant de l'email ni le nom du restaurant ;
+   - confirmation obligatoire (les deux saisies doivent être identiques) ;
+   - le nouveau mot de passe doit être différent de l'actuel.
+   Les comptes existants peuvent toujours se connecter avec leur ancien
+   mot de passe : la règle s'applique à la création et au changement.
+2. Anti-robot invisible (inscription, connexion, mot de passe oublié) :
+   - champ piège caché ("honeypot") que seuls les robots remplissent ;
+   - jeton horodaté et signé : refuse les formulaires envoyés trop vite
+     (moins de 3 s pour l'inscription) ou trop vieux (plus de 24 h), et
+     les formulaires fabriqués hors de la page.
+3. Validation stricte des champs : email (format, longueur), nom du
+   restaurant (pas de < > { } ` \\, pas de caractères de contrôle),
+   téléphone (chiffres et + - ( ) uniquement), identifiant d'URL.
+4. Connexion à temps constant : un email inconnu prend le même temps
+   qu'un mauvais mot de passe (empêche de deviner quels emails existent).
+5. Limitation des tentatives de changement de mot de passe (10 par heure).
+6. Pages de connexion et de mot de passe jamais mises en cache par le
+   navigateur (pas de retour arrière qui réaffiche un formulaire rempli).
+7. Mots de passe ultra-longs refusés avant le hachage (anti-saturation).
+
+La CSRF, la limitation des connexions, le verrouillage après 5 échecs et le
+journal d'audit existants restent en place : ce module s'y ajoute.
+"""
+import re
+import time
+import unicodedata
+
+from flask import request, flash, redirect, url_for, session
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from werkzeug.security import generate_password_hash, check_password_hash
+
+PASSWORD_MIN_LENGTH = 10
+PASSWORD_MAX_LENGTH = 64
+PASSWORD_HARD_LIMIT = 256          # au-delà, refus immédiat sans hachage
+
+SIGNUP_MIN_SECONDS = 3             # un humain met plus de 3 s à remplir l'inscription
+FORM_MAX_AGE_SECONDS = 24 * 3600   # un formulaire plus vieux doit être rechargé
+
+HONEYPOT_FIELD = "website"
+TIMESTAMP_FIELD = "form_ts"
+
+_EMAIL_RE = re.compile(r"^[a-z0-9._%+\-]+@[a-z0-9\-]+(\.[a-z0-9\-]+)*\.[a-z]{2,}$")
+_PHONE_ALLOWED_RE = re.compile(r"^[0-9+\-() ]+$")
+_SLUG_ALLOWED_RE = re.compile(r"^[a-z0-9\-]*$")
+_FORBIDDEN_NAME_CHARS = set("<>{}`\\")
+
+_COMMON_PASSWORDS = {
+    "password", "motdepasse", "motdepass", "azerty", "azertyuiop", "qwerty",
+    "qwertyuiop", "admin", "administrateur", "menuflash", "bienvenue",
+    "welcome", "restaurant", "letmein", "soleil", "bonjour", "iloveyou",
+    "jetaime", "secret", "changeme", "utilisateur", "user", "test",
+}
+_SEQUENCES = ("0123456789", "abcdefghijklmnopqrstuvwxyz", "azertyuiop", "qwertyuiop")
+
+# Hachage factice : sert à faire "travailler" le serveur autant pour un email
+# inconnu que pour un email existant (connexion à temps constant).
+_DUMMY_HASH = generate_password_hash("MenuFlashDummy2026xyz")
+
+
+# --------------------------------------------------------------------------
+# Validations de champs
+# --------------------------------------------------------------------------
+def normalize_email(raw):
+    return unicodedata.normalize("NFKC", (raw or "")).strip().lower()[:254]
+
+
+def validate_email(raw):
+    """Renvoie (email_normalisé, message_d'erreur_ou_None)."""
+    email = normalize_email(raw)
+    if not email:
+        return email, "L'adresse email est obligatoire."
+    if len(email) > 120 or ".." in email or not _EMAIL_RE.match(email):
+        return email, "L'adresse email n'est pas valide."
+    return email, None
+
+
+def password_errors(password, email="", extra_words=()):
+    """Liste des règles non respectées par un NOUVEAU mot de passe (vide = valide)."""
+    password = password or ""
+    if len(password) > PASSWORD_HARD_LIMIT:
+        return [f"Le mot de passe doit contenir au maximum {PASSWORD_MAX_LENGTH} caractères."]
+
+    errors = []
+    if not (PASSWORD_MIN_LENGTH <= len(password) <= PASSWORD_MAX_LENGTH):
+        errors.append(f"Le mot de passe doit contenir entre {PASSWORD_MIN_LENGTH} et "
+                      f"{PASSWORD_MAX_LENGTH} caractères.")
+    if not re.fullmatch(r"[A-Za-z0-9]*", password):
+        errors.append("Le mot de passe ne doit contenir que des lettres (sans accent) et des "
+                      "chiffres : aucun espace, aucune ponctuation.")
+    if not re.search(r"[A-Z]", password):
+        errors.append("Le mot de passe doit contenir au moins une lettre majuscule.")
+    if not re.search(r"[a-z]", password):
+        errors.append("Le mot de passe doit contenir au moins une lettre minuscule.")
+    if not re.search(r"[0-9]", password):
+        errors.append("Le mot de passe doit contenir au moins un chiffre.")
+    if errors:
+        return errors
+
+    low = password.lower()
+    letters_only = re.sub(r"[0-9]+", "", low)
+    if low in _COMMON_PASSWORDS or letters_only in _COMMON_PASSWORDS:
+        errors.append("Ce mot de passe est trop courant, choisissez-en un plus personnel.")
+    if re.search(r"(.)\1{3,}", low):
+        errors.append("Le mot de passe ne doit pas contenir 4 caractères identiques à la suite.")
+    if any(seq[i:i + 6] in low for seq in _SEQUENCES for i in range(len(seq) - 5)):
+        errors.append("Le mot de passe ne doit pas contenir de suite évidente "
+                      "(123456, abcdef, azerty...).")
+
+    words = []
+    local_part = (email or "").split("@")[0]
+    words.extend(re.split(r"[^a-z0-9]+", local_part.lower()))
+    for w in extra_words:
+        words.extend(re.split(r"[^a-z0-9]+", _ascii(w).lower()))
+    if any(len(w) >= 4 and w in low for w in words):
+        errors.append("Le mot de passe ne doit pas contenir votre email ni le nom du restaurant.")
+    return errors
+
+
+def validate_display_name(raw, label):
+    """Nom affiché (restaurant, membre d'équipe). Renvoie (valeur_nettoyée, erreur)."""
+    value = unicodedata.normalize("NFC", raw or "")
+    value = "".join(ch for ch in value if unicodedata.category(ch)[0] != "C")
+    value = re.sub(r"\s+", " ", value).strip()
+    if not value:
+        return value, f"{label} est obligatoire."
+    if len(value) < 2 or len(value) > 120:
+        return value, f"{label} doit contenir entre 2 et 120 caractères."
+    if any(ch in _FORBIDDEN_NAME_CHARS for ch in value):
+        return value, f"{label} contient des caractères non autorisés (< > {{ }} ` \\)."
+    if not re.search(r"[^\W\d_]", value):
+        return value, f"{label} doit contenir au moins une lettre."
+    return value, None
+
+
+def validate_phone(raw):
+    """Téléphone optionnel. Renvoie (valeur_nettoyée_ou_vide, erreur)."""
+    value = re.sub(r"\s+", " ", (raw or "")).strip()
+    if not value:
+        return "", None
+    digits = re.sub(r"\D", "", value)
+    if not _PHONE_ALLOWED_RE.match(value) or not (8 <= len(digits) <= 15):
+        return value, "Le numéro de téléphone n'est pas valide (8 à 15 chiffres)."
+    return value, None
+
+
+def validate_slug(raw):
+    value = (raw or "").strip().lower()
+    if value and (len(value) > 60 or not _SLUG_ALLOWED_RE.match(value)):
+        return value, ("L'adresse du menu ne peut contenir que des lettres minuscules, "
+                       "des chiffres et des tirets.")
+    return value, None
+
+
+def _ascii(text):
+    return unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode("ascii")
+
+
+# --------------------------------------------------------------------------
+# Anti-robot : champ piège + jeton horodaté signé
+# --------------------------------------------------------------------------
+def _serializer(secret):
+    return URLSafeTimedSerializer(secret, salt="mf-form-guard")
+
+
+def make_form_token(secret):
+    return _serializer(secret).dumps({"t": time.time()})
+
+
+def check_form_guard(form, secret, min_seconds=0):
+    """Renvoie un message d'erreur si l'envoi semble automatisé, sinon None."""
+    if (form.get(HONEYPOT_FIELD) or "").strip():
+        return "Envoi refusé. Veuillez réessayer."
+    token = form.get(TIMESTAMP_FIELD, "")
+    if not token:
+        return "Le formulaire est incomplet. Rechargez la page et réessayez."
+    try:
+        data = _serializer(secret).loads(token, max_age=FORM_MAX_AGE_SECONDS)
+    except SignatureExpired:
+        return "Le formulaire a expiré. Rechargez la page et réessayez."
+    except BadSignature:
+        return "Le formulaire est invalide. Rechargez la page et réessayez."
+    try:
+        elapsed = time.time() - float(data.get("t", 0))
+    except (TypeError, ValueError):
+        return "Le formulaire est invalide. Rechargez la page et réessayez."
+    if elapsed > FORM_MAX_AGE_SECONDS:
+        return "Le formulaire a expiré. Rechargez la page et réessayez."
+    if elapsed < min_seconds:
+        return "Envoi trop rapide. Patientez quelques secondes et réessayez."
+    return None
+
+
+# --------------------------------------------------------------------------
+# Branchement sur l'application
+# --------------------------------------------------------------------------
+_AUTH_ENDPOINTS = {
+    "signup", "admin_login", "forgot_password", "reset_password",
+    "change_password", "admin_team", "admin_team_add",
+    "super_admin_dashboard", "super_admin_create_restaurant",
+}
+
+
+def init_form_security(app, limiter=None):
+    secret = app.config["SECRET_KEY"]
+
+    @app.context_processor
+    def _inject_form_guard():
+        return {
+            "form_timestamp": lambda: make_form_token(secret),
+            "PASSWORD_MIN_LENGTH": PASSWORD_MIN_LENGTH,
+            "PASSWORD_MAX_LENGTH": PASSWORD_MAX_LENGTH,
+        }
+
+    @app.after_request
+    def _no_store_on_auth_pages(response):
+        if request.endpoint in _AUTH_ENDPOINTS:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+        return response
+
+    @app.before_request
+    def _validate_sensitive_forms():
+        if request.method != "POST":
+            return None
+        handler = _HANDLERS.get(request.endpoint)
+        if handler is None:
+            return None
+        errors, prefill = handler(request.form, secret)
+        if not errors:
+            return None
+        for message in errors:
+            flash(message, "error")
+        if prefill:
+            session["mf_prefill"] = prefill
+        _audit(app, request.endpoint, errors)
+        target = _REDIRECT_TO.get(request.endpoint, request.endpoint)
+        return redirect(url_for(target, **(request.view_args or {})))
+
+    if limiter is not None and "change_password" in app.view_functions:
+        app.view_functions["change_password"] = limiter.limit(
+            "10 per hour", methods=["POST"])(app.view_functions["change_password"])
+
+
+def _audit(app, endpoint, errors):
+    """Trace le refus dans le journal d'audit existant (si disponible)."""
+    try:
+        log_audit = app.view_functions[endpoint].__globals__.get("log_audit")
+        if log_audit:
+            log_audit(f"form_rejected_{endpoint}"[:40], success=False,
+                      user_email=normalize_email(request.form.get("email")
+                                                 or request.form.get("owner_email"))[:120] or None,
+                      details="; ".join(errors)[:300])
+    except Exception:
+        pass
+
+
+def _signup(form, secret):
+    prefill = {
+        "restaurant_name": (form.get("restaurant_name") or "")[:120],
+        "slug": (form.get("slug") or "")[:80],
+        "email": (form.get("email") or "")[:120],
+        "phone": (form.get("phone") or "")[:30],
+    }
+    guard = check_form_guard(form, secret, min_seconds=SIGNUP_MIN_SECONDS)
+    if guard:
+        return [guard], prefill
+    errors = []
+    name, err = validate_display_name(form.get("restaurant_name"), "Le nom du restaurant")
+    if err:
+        errors.append(err)
+    _, err = validate_slug(form.get("slug"))
+    if err:
+        errors.append(err)
+    email, err = validate_email(form.get("email"))
+    if err:
+        errors.append(err)
+    _, err = validate_phone(form.get("phone"))
+    if err:
+        errors.append(err)
+    password = form.get("password", "")
+    errors.extend(password_errors(password, email=email, extra_words=[name]))
+    if password != form.get("password_confirm", ""):
+        errors.append("Les deux mots de passe ne correspondent pas.")
+    return errors, prefill
+
+
+def _login(form, secret):
+    guard = check_form_guard(form, secret)
+    if guard:
+        return [guard], {"email": (form.get("email") or "")[:120]}
+    password = form.get("password", "")
+    if len(password) > PASSWORD_HARD_LIMIT:
+        return ["Identifiants incorrects."], None
+    # Temps constant : si l'email n'existe pas, on calcule quand même un hachage
+    # pour que la réponse prenne le même temps qu'avec un vrai compte.
+    try:
+        from models import User
+        if not User.query.filter_by(email=normalize_email(form.get("email"))).first():
+            check_password_hash(_DUMMY_HASH, password)
+    except Exception:
+        pass
+    return [], None
+
+
+def _forgot(form, secret):
+    guard = check_form_guard(form, secret)
+    if guard:
+        return [guard], None
+    _, err = validate_email(form.get("email"))
+    return ([err] if err else []), None
+
+
+def _reset(form, secret):
+    password = form.get("password", "")
+    errors = password_errors(password)
+    if password != form.get("password_confirm", ""):
+        errors.append("Les deux mots de passe ne correspondent pas.")
+    return errors, None
+
+
+def _change(form, secret):
+    new = form.get("new_password", "")
+    current = form.get("current_password", "")
+    email = ""
+    try:
+        from flask_login import current_user
+        email = current_user.email if current_user.is_authenticated else ""
+    except Exception:
+        pass
+    errors = password_errors(new, email=email)
+    if new != form.get("new_password_confirm", ""):
+        errors.append("Les deux nouveaux mots de passe ne correspondent pas.")
+    if new and new == current:
+        errors.append("Le nouveau mot de passe doit être différent de l'actuel.")
+    return errors, None
+
+
+def _team_add(form, secret):
+    errors = []
+    email, err = validate_email(form.get("email"))
+    if err:
+        errors.append(err)
+    if (form.get("name_note") or "").strip():
+        _, err = validate_display_name(form.get("name_note"), "Le nom")
+        if err:
+            errors.append(err)
+    errors.extend(password_errors(form.get("password", ""), email=email))
+    return errors, None
+
+
+def _super_admin_create(form, secret):
+    errors = []
+    name, err = validate_display_name(form.get("name"), "Le nom du restaurant")
+    if err:
+        errors.append(err)
+    _, err = validate_slug(form.get("slug"))
+    if err:
+        errors.append(err)
+    email, err = validate_email(form.get("owner_email"))
+    if err:
+        errors.append(err)
+    errors.extend(password_errors(form.get("owner_password", ""), email=email, extra_words=[name]))
+    return errors, None
+
+
+# Routes POST-only : en cas d'erreur, on renvoie vers la page du formulaire.
+_REDIRECT_TO = {
+    "admin_team_add": "admin_team",
+    "super_admin_create_restaurant": "super_admin_dashboard",
+}
+
+_HANDLERS = {
+    "signup": _signup,
+    "admin_login": _login,
+    "forgot_password": _forgot,
+    "reset_password": _reset,
+    "change_password": _change,
+    "admin_team_add": _team_add,
+    "super_admin_create_restaurant": _super_admin_create,
+}
 
 
 ==================== seed.py ====================
@@ -3969,8 +4502,6 @@ with app.app_context():
 
     poll();
     schedule();
-    initGlobalOrderWatcher();
-    initThemeLiveSync();
   }
 
   function initThemeLiveSync() {
@@ -4059,7 +4590,197 @@ with app.app_context():
     initKitchenPolling();
     initCopyButtons();
     initPaymentModal();
+    initGlobalOrderWatcher();
     initThemeLiveSync();
+  });
+})();
+
+
+
+==================== static\forms_security.css ====================
+/* MenuFlash Mini — styles de l'aide à la saisie sécurisée (forms_security.js) */
+.mf-pwd-wrap { position: relative; }
+.mf-pwd-wrap > input { padding-right: 2.6rem; }
+.mf-pwd-wrap.form-floating > input,
+.form-floating > .mf-pwd-wrap > input { padding-right: 2.6rem; }
+.mf-pwd-toggle {
+  position: absolute; top: 50%; right: .55rem; transform: translateY(-50%);
+  border: 0; background: transparent; color: var(--mf-ink-soft, #6B6A66);
+  padding: .25rem .35rem; line-height: 1; z-index: 5;
+}
+.mf-pwd-toggle:hover, .mf-pwd-toggle:focus-visible { color: var(--mf-accent-dark, #B5730F); }
+.mf-pwd-rules { list-style: none; padding: 0; margin: .4rem 0 0; font-size: .78rem; }
+.mf-pwd-rules li { color: var(--mf-ink-soft, #6B6A66); padding-left: 1.3rem; position: relative; margin-bottom: 2px; }
+.mf-pwd-rules li::before { content: "○"; position: absolute; left: .1rem; }
+.mf-pwd-rules li.ok { color: var(--mf-success, #2E7D5B); font-weight: 600; }
+.mf-pwd-rules li.ok::before { content: "✓"; }
+.mf-pwd-hint, .mf-confirm-msg { font-size: .78rem; color: var(--mf-danger, #C4453A); margin-top: .35rem; }
+.mf-caps-warning { font-size: .78rem; color: var(--mf-warning, #B8860B); margin-top: .35rem; }
+.mf-hp { position: absolute !important; left: -10000px !important; top: auto; width: 1px; height: 1px; overflow: hidden; }
+
+
+==================== static\forms_security.js ====================
+/* ==========================================================================
+   MenuFlash Mini — aide à la saisie sécurisée des formulaires (navigateur)
+
+   Ce script AIDE l'utilisateur, il ne remplace pas les contrôles du serveur
+   (security_forms.py), qui restent la seule vraie protection.
+
+   - input[data-mf-password="new"]     : nouveau mot de passe -> liste des
+     règles mise à jour en direct, blocage des espaces / ponctuation /
+     accents à la frappe, message clair si collage d'un texte non autorisé.
+   - input[data-mf-password="current"] : mot de passe existant -> seulement
+     le bouton afficher/masquer et l'alerte majuscules.
+   - input[data-mf-confirm="<id>"]     : confirmation, doit être identique.
+   - form[data-mf-guard]               : empêche le double envoi.
+   ========================================================================== */
+(function () {
+  "use strict";
+
+  var MIN = 10, MAX = 64;
+  var ALLOWED = /^[A-Za-z0-9]*$/;
+  var RULES = [
+    { key: "len",   label: MIN + " à " + MAX + " caractères",
+      test: function (v) { return v.length >= MIN && v.length <= MAX; } },
+    { key: "upper", label: "Une lettre majuscule", test: function (v) { return /[A-Z]/.test(v); } },
+    { key: "lower", label: "Une lettre minuscule", test: function (v) { return /[a-z]/.test(v); } },
+    { key: "digit", label: "Un chiffre",           test: function (v) { return /[0-9]/.test(v); } },
+    { key: "chars", label: "Lettres sans accent et chiffres uniquement (ni espace, ni ponctuation)",
+      test: function (v) { return v.length > 0 && ALLOWED.test(v); } }
+  ];
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text) e.textContent = text;
+    return e;
+  }
+
+  function addToggle(input) {
+    var wrap = el("div", "mf-pwd-wrap");
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    var btn = el("button", "mf-pwd-toggle");
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Afficher le mot de passe");
+    btn.innerHTML = '<i class="bi bi-eye"></i>';
+    btn.addEventListener("click", function () {
+      var show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.innerHTML = show ? '<i class="bi bi-eye-slash"></i>' : '<i class="bi bi-eye"></i>';
+      btn.setAttribute("aria-label", show ? "Masquer le mot de passe" : "Afficher le mot de passe");
+      input.focus();
+    });
+    wrap.appendChild(btn);
+    return wrap;
+  }
+
+  function addCapsWarning(input, after) {
+    var warn = el("div", "mf-caps-warning d-none", "Attention : la touche Verr. Maj est activée.");
+    after.parentNode.insertBefore(warn, after.nextSibling);
+    function check(e) {
+      if (e.getModifierState) warn.classList.toggle("d-none", !e.getModifierState("CapsLock"));
+    }
+    input.addEventListener("keydown", check);
+    input.addEventListener("keyup", check);
+    input.addEventListener("blur", function () { warn.classList.add("d-none"); });
+    return warn;
+  }
+
+  function setupNewPassword(input, wrap, after) {
+    var list = el("ul", "mf-pwd-rules");
+    list.setAttribute("aria-live", "polite");
+    var items = {};
+    RULES.forEach(function (r) {
+      var li = el("li", "", r.label);
+      items[r.key] = li;
+      list.appendChild(li);
+    });
+    var hint = el("div", "mf-pwd-hint d-none");
+    after.parentNode.insertBefore(list, after.nextSibling);
+    list.parentNode.insertBefore(hint, list);
+
+    function showHint(text) {
+      hint.textContent = text;
+      hint.classList.remove("d-none");
+      clearTimeout(hint._t);
+      hint._t = setTimeout(function () { hint.classList.add("d-none"); }, 3500);
+    }
+
+    // Bloque à la frappe les caractères non autorisés.
+    input.addEventListener("beforeinput", function (e) {
+      if (e.inputType === "insertText" && e.data && !ALLOWED.test(e.data)) {
+        e.preventDefault();
+        showHint("Caractère « " + e.data + " » non autorisé : uniquement des lettres sans accent et des chiffres.");
+      }
+    });
+
+    function update() {
+      var v = input.value;
+      var allOk = true;
+      RULES.forEach(function (r) {
+        var ok = r.test(v);
+        items[r.key].classList.toggle("ok", ok);
+        if (!ok) allOk = false;
+      });
+      input.setCustomValidity(allOk || v === "" ? "" :
+        "Le mot de passe ne respecte pas toutes les règles affichées.");
+      if (v && !ALLOWED.test(v)) {
+        showHint("Le texte contient des espaces, de la ponctuation ou des accents, qui ne sont pas autorisés.");
+      }
+      document.querySelectorAll('[data-mf-confirm="' + input.id + '"]').forEach(function (c) {
+        c.dispatchEvent(new Event("input"));
+      });
+    }
+    input.addEventListener("input", update);
+    update();
+  }
+
+  function setupConfirm(confirm) {
+    var target = document.getElementById(confirm.getAttribute("data-mf-confirm"));
+    if (!target) return;
+    var msg = el("div", "mf-confirm-msg d-none", "Les deux mots de passe ne correspondent pas.");
+    var anchor = confirm.closest(".mf-pwd-wrap") || confirm;
+    anchor.parentNode.insertBefore(msg, anchor.nextSibling);
+    confirm.addEventListener("input", function () {
+      var mismatch = confirm.value !== "" && confirm.value !== target.value;
+      confirm.setCustomValidity(mismatch ? "Les deux mots de passe ne correspondent pas." : "");
+      msg.classList.toggle("d-none", !mismatch);
+    });
+  }
+
+  function setupNoDoubleSubmit(form) {
+    form.addEventListener("submit", function (e) {
+      if (form.dataset.mfSubmitting === "1") { e.preventDefault(); return; }
+      if (typeof form.checkValidity === "function" && !form.checkValidity()) return;
+      form.dataset.mfSubmitting = "1";
+      form.querySelectorAll('button[type="submit"]').forEach(function (b) {
+        b.disabled = true;
+        b.dataset.mfLabel = b.innerHTML;
+        b.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Envoi…';
+      });
+      // Si l'utilisateur revient sur la page (bouton retour), on réactive.
+      setTimeout(function () {
+        form.dataset.mfSubmitting = "0";
+        form.querySelectorAll('button[type="submit"]').forEach(function (b) {
+          b.disabled = false;
+          if (b.dataset.mfLabel) b.innerHTML = b.dataset.mfLabel;
+        });
+      }, 15000);
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll("input[data-mf-password]").forEach(function (input) {
+      input.setAttribute("autocapitalize", "off");
+      input.setAttribute("autocorrect", "off");
+      input.setAttribute("spellcheck", "false");
+      var wrap = addToggle(input);
+      var warn = addCapsWarning(input, wrap);
+      if (input.getAttribute("data-mf-password") === "new") setupNewPassword(input, wrap, warn);
+    });
+    document.querySelectorAll("input[data-mf-confirm]").forEach(setupConfirm);
+    document.querySelectorAll("form[data-mf-guard]").forEach(setupNoDoubleSubmit);
   });
 })();
 
@@ -4352,6 +5073,69 @@ with app.app_context():
   .mf-landing-lead { max-width: 100%; }
   .mf-phone-mock-wrap { margin-top: 32px; }
 }
+
+
+==================== static\orders_cleanup.js ====================
+/* ==========================================================================
+   MenuFlash Mini — nettoyage du panneau "Mes commandes" (côté client)
+
+   Le téléphone du client mémorise les numéros de ses commandes dans
+   localStorage (clé "mf_orders_<slug>"). Le serveur ne renvoie que les
+   commandes encore pertinentes (en cours, annulée depuis moins de 5 min,
+   servie depuis moins de 30 min, et jamais plus de 12 h), et indique dans
+   `expired_ids` les numéros que le téléphone peut oublier.
+
+   Ce script retire ces numéros expirés de la mémoire du téléphone, pour
+   que la liste ne grossisse jamais avec le temps. Il est indépendant de
+   app.js : il ne fait que nettoyer le stockage, l'affichage reste géré
+   par app.js (qui reçoit déjà la liste filtrée par le serveur).
+   ========================================================================== */
+(function () {
+  "use strict";
+
+  function readIds(key) {
+    try {
+      var ids = JSON.parse(localStorage.getItem(key) || "[]");
+      return Array.isArray(ids) ? ids : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function initOrdersCleanup() {
+    var form = document.getElementById("order-form");
+    if (!form || !form.dataset.slug) return;
+
+    var slug = form.dataset.slug;
+    var key = "mf_orders_" + slug;
+
+    function prune() {
+      var ids = readIds(key);
+      if (ids.length === 0) return;
+
+      fetch("/m/" + encodeURIComponent(slug) + "/commandes/etats.json?ids=" + ids.join(","),
+            { cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data || !Array.isArray(data.expired_ids) || data.expired_ids.length === 0) return;
+
+          var expired = {};
+          data.expired_ids.forEach(function (id) { expired[String(id)] = true; });
+
+          // On relit la liste au moment d'écrire : une commande envoyée
+          // pendant la requête ne doit surtout pas être effacée.
+          var kept = readIds(key).filter(function (id) { return !expired[String(id)]; });
+          try { localStorage.setItem(key, JSON.stringify(kept)); } catch (e) {}
+        })
+        .catch(function () { /* réseau indisponible : on réessaiera */ });
+    }
+
+    prune();
+    setInterval(prune, 60000);
+  }
+
+  document.addEventListener("DOMContentLoaded", initOrdersCleanup);
+})();
 
 
 ==================== static\style.css ====================
@@ -5081,6 +5865,19 @@ def build_dashboard_stats(restaurant_id, now=None):
 {% include "_new_restaurant_modal.html" %}
 
 
+==================== templates\_form_guard.html ====================
+{# Protection anti-robot invisible : jeton CSRF + jeton horodaté signé + champ
+   piège. Les vrais utilisateurs ne voient et ne remplissent jamais le champ
+   « website » ; les robots qui remplissent tous les champs sont refusés.
+   Vérifié côté serveur par security_forms.py. #}
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="form_ts" value="{{ form_timestamp() }}">
+<div class="mf-hp" aria-hidden="true">
+  <label for="mf-website">Ne pas remplir ce champ</label>
+  <input type="text" id="mf-website" name="website" tabindex="-1" autocomplete="off" value="">
+</div>
+
+
 ==================== templates\_new_restaurant_modal.html ====================
 {% if current_user.is_authenticated and current_user.is_owner and not current_user.is_super_admin and owner_restaurants %}
 <div class="modal fade" id="new-restaurant-modal" tabindex="-1" aria-hidden="true">
@@ -5410,8 +6207,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     <td>
                       <form method="post" action="{{ url_for('toggle_item', item_id=item.id) }}" class="d-inline">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-sm mf-pill-toggle border-0"
-                                 type="submit" class="btn btn-sm mf-pill-toggle border-0 {{ 'mf-pill-on' if item.is_available else 'mf-pill-off' }}">
+                        <button type="submit" class="btn btn-sm mf-pill-toggle border-0 {{ 'mf-pill-on' if item.is_available else 'mf-pill-off' }}">
                           <i class="bi {{ 'bi-check-circle-fill' if item.is_available else 'bi-x-circle-fill' }} me-1"></i>
                           {{ 'Disponible' if item.is_available else 'Épuisé' }}
                         </button>
@@ -5577,6 +6373,7 @@ document.addEventListener("DOMContentLoaded", function () {
 {% endblock %}
 
 
+
 ==================== templates\admin_history.html ====================
 {% extends "base.html" %}
 {% block title %}Historique — {{ restaurant.name }}{% endblock %}
@@ -5633,6 +6430,7 @@ document.addEventListener("DOMContentLoaded", function () {
 {% extends "base.html" %}
 {% block title %}Connexion — MenuFlash Mini{% endblock %}
 {% block content %}
+{% set fv = session.pop('mf_prefill', {}) %}
 <div class="mf-auth-bg">
   <div class="card mf-auth-card p-2">
     <div class="card-body p-4">
@@ -5644,15 +6442,18 @@ document.addEventListener("DOMContentLoaded", function () {
           </h1>
         </a>
       </div>
-      <form method="post">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-floating mb-3">
-          <input type="email" class="form-control" id="email" name="email" placeholder="vous@restaurant.com" required>
-          <label for="email">Adresse email</label>
+      <form method="post" data-mf-guard autocomplete="on">
+        {% include "_form_guard.html" %}
+        <div class="mb-3">
+          <label for="email" class="form-label small fw-semibold">Adresse email</label>
+          <input type="email" class="form-control" id="email" name="email" maxlength="120"
+                 autocomplete="username" autocapitalize="off" spellcheck="false" inputmode="email"
+                 placeholder="vous@restaurant.com" value="{{ fv.email or '' }}" required autofocus>
         </div>
-        <div class="form-floating mb-2">
-          <input type="password" class="form-control" id="password" name="password" placeholder="Mot de passe" required>
-          <label for="password">Mot de passe</label>
+        <div class="mb-2">
+          <label for="password" class="form-label small fw-semibold">Mot de passe</label>
+          <input type="password" class="form-control" id="password" name="password" maxlength="128"
+                 data-mf-password="current" autocomplete="current-password" required>
         </div>
         <div class="text-end mb-3">
           <a href="{{ url_for('forgot_password') }}" class="small">Mot de passe oublié ?</a>
@@ -6095,12 +6896,26 @@ document.addEventListener("DOMContentLoaded", function () {
   <div class="card mf-section-card mb-4">
     <div class="card-body">
       <h2 class="mf-section-title fs-6 mb-3">Ajouter un compte cuisinier</h2>
-      <form method="post" action="{{ url_for('admin_team_add') }}" class="row g-2">
+      <form method="post" action="{{ url_for('admin_team_add') }}" class="row g-2" data-mf-guard autocomplete="off">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="col-md-4"><input type="text" name="name_note" class="form-control" maxlength="80" placeholder="Nom (optionnel, ex: Fatou)"></div>
-        <div class="col-md-4"><input type="email" name="email" class="form-control" maxlength="120" placeholder="Email de connexion" required></div>
-        <div class="col-md-3"><input type="password" name="password" class="form-control" placeholder="Mot de passe (8 car. min)" minlength="8" required></div>
-        <div class="col-md-1"><button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus-lg"></i></button></div>
+        <div class="col-md-4">
+          <label for="staff-name" class="form-label small">Nom (optionnel)</label>
+          <input type="text" id="staff-name" name="name_note" class="form-control" maxlength="80" autocomplete="off" placeholder="Ex : Fatou">
+        </div>
+        <div class="col-md-4">
+          <label for="staff-email" class="form-label small">Email de connexion</label>
+          <input type="email" id="staff-email" name="email" class="form-control" maxlength="120"
+                 autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email" required>
+        </div>
+        <div class="col-md-4">
+          <label for="staff-password" class="form-label small">Mot de passe</label>
+          <input type="password" id="staff-password" name="password" class="form-control"
+                 data-mf-password="new" autocomplete="new-password"
+                 minlength="{{ PASSWORD_MIN_LENGTH }}" maxlength="{{ PASSWORD_MAX_LENGTH }}" required>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Créer le compte</button>
+        </div>
       </form>
     </div>
   </div>
@@ -6153,7 +6968,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3">
+  <link rel="stylesheet" href="{{ url_for('static', filename='forms_security.css') }}?v=1">
 
   <style>
     :root {
@@ -6167,9 +6983,9 @@ document.addEventListener("DOMContentLoaded", function () {
 </head>
 <body class="{{ body_class|default('') }}">
 
-{% if current_user.is_authenticated and not current_user.is_super_admin and request.endpoint == 'admin_orders' %}
-  <div id="theme-sync-root" data-stream-url="{{ url_for('admin_orders_stream') }}" class="visually-hidden"></div>
-{% endif %}
+  {% if current_user.is_authenticated and not current_user.is_super_admin and request.endpoint == 'admin_orders' %}
+    <div id="theme-sync-root" data-stream-url="{{ url_for('admin_orders_stream') }}" class="visually-hidden"></div>
+  {% endif %}
 
   {% if current_user.is_authenticated and not current_user.is_super_admin and not current_user.email_verified %}
     <div class="mf-security-banner">
@@ -6213,7 +7029,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=3"></script>
+  <script src="{{ url_for('static', filename='orders_cleanup.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='forms_security.js') }}?v=1"></script>
   {% block extra_scripts %}{% endblock %}
 </body>
 </html>
@@ -6226,8 +7044,6 @@ document.addEventListener("DOMContentLoaded", function () {
 {% if restaurant %}
   {% include "_admin_navbar.html" %}
 {% else %}
-  {# Super-admin : pas de restaurant actif pertinent, on garde la marque
-     de la plateforme et une navigation minimale. #}
   <nav class="navbar navbar-expand-lg mf-navbar sticky-top">
     <div class="container-fluid px-3 px-md-4">
       <span class="navbar-brand d-flex align-items-center gap-2 mb-0">
@@ -6249,19 +7065,25 @@ document.addEventListener("DOMContentLoaded", function () {
         <h1 class="h5 fw-bold mt-2 mb-1">Changer de mot de passe</h1>
         <p class="text-secondary small mb-0">Toutes vos autres sessions ouvertes seront déconnectées par sécurité.</p>
       </div>
-      <form method="post">
+      <form method="post" data-mf-guard>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="username" value="{{ current_user.email }}" autocomplete="username" class="d-none" readonly tabindex="-1" aria-hidden="true">
         <div class="mb-3">
-          <label class="form-label small fw-semibold">Mot de passe actuel</label>
-          <input type="password" name="current_password" class="form-control" required>
+          <label for="current_password" class="form-label small fw-semibold">Mot de passe actuel</label>
+          <input type="password" id="current_password" name="current_password" class="form-control"
+                 data-mf-password="current" autocomplete="current-password" maxlength="128" required>
         </div>
         <div class="mb-3">
-          <label class="form-label small fw-semibold">Nouveau mot de passe</label>
-          <input type="password" name="new_password" class="form-control" minlength="8" placeholder="8 caractères minimum" required>
+          <label for="new_password" class="form-label small fw-semibold">Nouveau mot de passe</label>
+          <input type="password" id="new_password" name="new_password" class="form-control"
+                 data-mf-password="new" autocomplete="new-password"
+                 minlength="{{ PASSWORD_MIN_LENGTH }}" maxlength="{{ PASSWORD_MAX_LENGTH }}" required>
         </div>
         <div class="mb-4">
-          <label class="form-label small fw-semibold">Confirmer le nouveau mot de passe</label>
-          <input type="password" name="new_password_confirm" class="form-control" minlength="8" required>
+          <label for="new_password_confirm" class="form-label small fw-semibold">Confirmer le nouveau mot de passe</label>
+          <input type="password" id="new_password_confirm" name="new_password_confirm" class="form-control"
+                 data-mf-password="current" data-mf-confirm="new_password" autocomplete="new-password"
+                 maxlength="{{ PASSWORD_MAX_LENGTH }}" required>
         </div>
         <button type="submit" class="btn btn-primary w-100 py-2">Mettre à jour le mot de passe</button>
       </form>
@@ -6283,11 +7105,13 @@ document.addEventListener("DOMContentLoaded", function () {
         <h1 class="h5 fw-bold mt-2 mb-1" style="color: var(--mf-ink);">Mot de passe oublié</h1>
         <p class="text-secondary small mb-0">Entrez votre email, nous vous enverrons un lien de réinitialisation.</p>
       </div>
-      <form method="post">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-floating mb-3">
-          <input type="email" class="form-control" id="email" name="email" maxlength="120" placeholder="vous@restaurant.com" required>
-          <label for="email">Adresse email</label>
+      <form method="post" data-mf-guard>
+        {% include "_form_guard.html" %}
+        <div class="mb-3">
+          <label for="email" class="form-label small fw-semibold">Adresse email</label>
+          <input type="email" class="form-control" id="email" name="email" maxlength="120"
+                 autocomplete="email" autocapitalize="off" spellcheck="false" inputmode="email"
+                 placeholder="vous@restaurant.com" required autofocus>
         </div>
         <button type="submit" class="btn btn-primary w-100 py-2">Envoyer le lien de réinitialisation</button>
       </form>
@@ -6900,15 +7724,19 @@ document.addEventListener("DOMContentLoaded", function () {
         <h1 class="h5 fw-bold mt-2 mb-1" style="color: var(--mf-ink);">Nouveau mot de passe</h1>
         <p class="text-secondary small mb-0">Ce lien est à usage unique et expire après 1 heure.</p>
       </div>
-      <form method="post">
+      <form method="post" data-mf-guard>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-floating mb-3">
-          <input type="password" class="form-control" id="password" name="password" minlength="8" placeholder="Nouveau mot de passe" required>
-          <label for="password">Nouveau mot de passe (8 caractères min.)</label>
+        <div class="mb-3">
+          <label for="password" class="form-label small fw-semibold">Nouveau mot de passe</label>
+          <input type="password" class="form-control" id="password" name="password"
+                 data-mf-password="new" autocomplete="new-password"
+                 minlength="{{ PASSWORD_MIN_LENGTH }}" maxlength="{{ PASSWORD_MAX_LENGTH }}" required autofocus>
         </div>
-        <div class="form-floating mb-4">
-          <input type="password" class="form-control" id="password_confirm" name="password_confirm" minlength="8" placeholder="Confirmer" required>
-          <label for="password_confirm">Confirmer le mot de passe</label>
+        <div class="mb-4">
+          <label for="password_confirm" class="form-label small fw-semibold">Confirmer le mot de passe</label>
+          <input type="password" class="form-control" id="password_confirm" name="password_confirm"
+                 data-mf-password="current" data-mf-confirm="password" autocomplete="new-password"
+                 maxlength="{{ PASSWORD_MAX_LENGTH }}" required>
         </div>
         <button type="submit" class="btn btn-primary w-100 py-2">Réinitialiser le mot de passe</button>
       </form>
@@ -6925,6 +7753,7 @@ document.addEventListener("DOMContentLoaded", function () {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="robots" content="noindex">
   <title>Créer mon compte — MenuFlash Mini</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -6932,8 +7761,9 @@ document.addEventListener("DOMContentLoaded", function () {
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3">
   <link rel="stylesheet" href="{{ url_for('static', filename='landing.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='forms_security.css') }}?v=1">
 </head>
 <body class="mf-landing-body">
 
@@ -6943,6 +7773,8 @@ document.addEventListener("DOMContentLoaded", function () {
       <script id="flash-data" type="application/json">{{ messages|tojson }}</script>
     {% endif %}
   {% endwith %}
+
+  {% set fv = form_values or session.pop('mf_prefill', {}) %}
 
   <nav class="mf-landing-nav">
     <div class="container d-flex align-items-center justify-content-between py-3">
@@ -6962,41 +7794,55 @@ document.addEventListener("DOMContentLoaded", function () {
           <p class="text-secondary small mb-0">7 jours d'essai gratuit, sans carte bancaire.</p>
         </div>
 
-        <form method="post" id="signup-form" novalidate>
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <form method="post" id="signup-form" data-mf-guard autocomplete="on">
+          {% include "_form_guard.html" %}
 
           <div class="mb-3">
-            <label class="form-label small fw-semibold">Nom de votre restaurant</label>
-            <input type="text" name="restaurant_name" id="restaurant-name-input" class="form-control" maxlength="120"
-                   placeholder="Ex : Chez Awa" value="{{ form_values.restaurant_name if form_values else '' }}" required>
+            <label for="restaurant-name-input" class="form-label small fw-semibold">Nom de votre restaurant</label>
+            <input type="text" name="restaurant_name" id="restaurant-name-input" class="form-control"
+                   minlength="2" maxlength="120" autocomplete="organization"
+                   placeholder="Ex : Chez Awa" value="{{ fv.restaurant_name or '' }}" required>
           </div>
 
           <div class="mb-3">
-            <label class="form-label small fw-semibold">Adresse de votre menu</label>
+            <label for="slug-input" class="form-label small fw-semibold">Adresse de votre menu</label>
             <div class="input-group">
               <span class="input-group-text mf-signup-url-prefix">menuflash.app/m/</span>
-              <input type="text" name="slug" id="slug-input" class="form-control" maxlength="80"
-                     placeholder="chez-awa" value="{{ form_values.slug if form_values else '' }}">
+              <input type="text" name="slug" id="slug-input" class="form-control" maxlength="60"
+                     pattern="[a-z0-9\-]*" autocomplete="off" spellcheck="false"
+                     placeholder="chez-awa" value="{{ fv.slug or '' }}">
             </div>
             <div class="form-text" id="slug-feedback">Laissez vide pour générer automatiquement à partir du nom.</div>
           </div>
 
           <div class="mb-3">
-            <label class="form-label small fw-semibold">Email de connexion</label>
-            <input type="email" name="email" class="form-control" maxlength="120" placeholder="vous@restaurant.com"
-                   value="{{ form_values.email if form_values else '' }}" required>
+            <label for="email-input" class="form-label small fw-semibold">Email de connexion</label>
+            <input type="email" name="email" id="email-input" class="form-control" maxlength="120"
+                   autocomplete="email" autocapitalize="off" spellcheck="false" inputmode="email"
+                   placeholder="vous@restaurant.com" value="{{ fv.email or '' }}" required>
             <div class="form-text">Un email de confirmation vous sera envoyé à cette adresse.</div>
           </div>
 
           <div class="mb-3">
-            <label class="form-label small fw-semibold">Mot de passe</label>
-            <input type="password" name="password" class="form-control" placeholder="8 caractères minimum" minlength="8" required>
+            <label for="password-input" class="form-label small fw-semibold">Mot de passe</label>
+            <input type="password" name="password" id="password-input" class="form-control"
+                   data-mf-password="new" autocomplete="new-password"
+                   minlength="{{ PASSWORD_MIN_LENGTH }}" maxlength="{{ PASSWORD_MAX_LENGTH }}"
+                   placeholder="{{ PASSWORD_MIN_LENGTH }} caractères minimum" required>
+          </div>
+
+          <div class="mb-3">
+            <label for="password-confirm-input" class="form-label small fw-semibold">Confirmer le mot de passe</label>
+            <input type="password" name="password_confirm" id="password-confirm-input" class="form-control"
+                   data-mf-password="current" data-mf-confirm="password-input" autocomplete="new-password"
+                   maxlength="{{ PASSWORD_MAX_LENGTH }}" required>
           </div>
 
           <div class="mb-4">
-            <label class="form-label small fw-semibold">Téléphone (optionnel)</label>
-            <input type="tel" name="phone" class="form-control" maxlength="30" placeholder="Pour que vos clients vous contactent"
-                   value="{{ form_values.phone if form_values else '' }}">
+            <label for="phone-input" class="form-label small fw-semibold">Téléphone (optionnel)</label>
+            <input type="tel" name="phone" id="phone-input" class="form-control" maxlength="30"
+                   autocomplete="tel" inputmode="tel" pattern="[0-9+\-() ]*"
+                   placeholder="Ex : +223 70 00 00 00" value="{{ fv.phone or '' }}">
           </div>
 
           <button type="submit" class="btn btn-primary w-100 py-2">
@@ -7011,13 +7857,14 @@ document.addEventListener("DOMContentLoaded", function () {
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=3"></script>
+  <script src="{{ url_for('static', filename='forms_security.js') }}?v=1"></script>
   <script>
     (function () {
       var nameInput = document.getElementById("restaurant-name-input");
       var slugInput = document.getElementById("slug-input");
       var feedback = document.getElementById("slug-feedback");
-      var slugEditedManually = false;
+      var slugEditedManually = slugInput.value !== "";
       var checkTimer = null;
 
       function slugifyClientSide(value) {
@@ -7026,7 +7873,8 @@ document.addEventListener("DOMContentLoaded", function () {
           .toLowerCase().trim()
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/-+/g, "-")
-          .replace(/^-|-$/g, "");
+          .replace(/^-|-$/g, "")
+          .slice(0, 60);
       }
 
       function checkSlug(value) {
@@ -7155,13 +8003,31 @@ document.addEventListener("DOMContentLoaded", function () {
   <div class="card mf-section-card mb-4">
     <div class="card-body">
       <h2 class="mf-section-title fs-6 mb-3">Créer un nouveau restaurant client (manuellement)</h2>
-      <form method="post" action="{{ url_for('super_admin_create_restaurant') }}" class="row g-2">
+      <form method="post" action="{{ url_for('super_admin_create_restaurant') }}" class="row g-2" data-mf-guard autocomplete="off">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="col-md-3"><input type="text" name="name" class="form-control" maxlength="120" placeholder="Nom du restaurant" required></div>
-        <div class="col-md-3"><input type="text" name="slug" class="form-control" maxlength="80" placeholder="slug-url (ex: chez-awa)"></div>
-        <div class="col-md-3"><input type="email" name="owner_email" class="form-control" maxlength="120" placeholder="Email du gestionnaire" required></div>
-        <div class="col-md-2"><input type="password" name="owner_password" class="form-control" placeholder="Mot de passe (8 car. min)" minlength="8" required></div>
-        <div class="col-md-1"><button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus-lg"></i></button></div>
+        <div class="col-md-6">
+          <label for="sa-name" class="form-label small">Nom du restaurant</label>
+          <input type="text" id="sa-name" name="name" class="form-control" minlength="2" maxlength="120" required>
+        </div>
+        <div class="col-md-6">
+          <label for="sa-slug" class="form-label small">Adresse du menu (optionnel)</label>
+          <input type="text" id="sa-slug" name="slug" class="form-control" maxlength="60"
+                 pattern="[a-z0-9\-]*" spellcheck="false" placeholder="ex : chez-awa">
+        </div>
+        <div class="col-md-6">
+          <label for="sa-email" class="form-label small">Email du gestionnaire</label>
+          <input type="email" id="sa-email" name="owner_email" class="form-control" maxlength="120"
+                 autocomplete="off" autocapitalize="off" spellcheck="false" required>
+        </div>
+        <div class="col-md-6">
+          <label for="sa-password" class="form-label small">Mot de passe provisoire</label>
+          <input type="password" id="sa-password" name="owner_password" class="form-control"
+                 data-mf-password="new" autocomplete="new-password"
+                 minlength="{{ PASSWORD_MIN_LENGTH }}" maxlength="{{ PASSWORD_MAX_LENGTH }}" required>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Créer le restaurant</button>
+        </div>
       </form>
     </div>
   </div>
@@ -7227,7 +8093,7 @@ document.addEventListener("DOMContentLoaded", function () {
       </div>
       <div class="modal-body">
         <div class="row g-2">
-          <div class="col-6"><label class="form-label small">Montant (FCFA)</label><input type="number" name="amount" class="form-control" required></div>
+          <div class="col-6"><label class="form-label small">Montant (FCFA)</label><input type="number" name="amount" class="form-control" min="0" max="100000000" step="1" required></div>
           <div class="col-6">
             <label class="form-label small">Méthode</label>
             <select name="method" class="form-select">
@@ -7246,7 +8112,7 @@ document.addEventListener("DOMContentLoaded", function () {
               <option value="basic">Basic</option><option value="pro">Pro</option>
             </select>
           </div>
-          <div class="col-12"><label class="form-label small">Référence (optionnel)</label><input type="text" name="reference" class="form-control" placeholder="ID transaction Mobile Money"></div>
+          <div class="col-12"><label class="form-label small">Référence (optionnel)</label><input type="text" name="reference" class="form-control" maxlength="80" placeholder="ID transaction Mobile Money"></div>
         </div>
       </div>
       <div class="modal-footer border-0">
