@@ -20,6 +20,9 @@ Menu affiché par QR code + commande en ligne (sans paiement en ligne).
   de navigation du back-office affiche le NOM et le LOGO du restaurant
   actif, à la place de la marque "MenuFlash Mini".
 + NAVIGATION RÉORGANISÉE EN MENUS DÉROULANTS (templates/_admin_navbar.html).
++ IMAGES PERMANENTES : logos et photos de plats sont stockés dans la base
+  de données (voir media_store.py) au lieu du disque du serveur, qui est
+  effacé à chaque redéploiement / mise en veille sur Render.
 + "MES COMMANDES" CÔTÉ CLIENT LIMITÉ À LA VISITE EN COURS : une commande
   annulée disparaît après 5 min, une commande servie après 30 min, et
   toute commande disparaît après 12 h (voir CLIENT_ORDER_* ci-dessous).
@@ -75,6 +78,7 @@ from stats_utils import build_dashboard_stats
 from i18n import TRANSLATIONS
 import realtime
 from mailer import init_mailer, send_transactional_email
+from media_store import StoredImage, ensure_media_table, store_image, delete_stored_image
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
@@ -155,6 +159,7 @@ app.config["MAIL_PASSWORD"] = os.environ.get("MAIL_PASSWORD", "")
 app.config["MAIL_DEFAULT_SENDER"] = os.environ.get("MAIL_DEFAULT_SENDER", "no-reply@menuflash.local")
 
 db.init_app(app)
+ensure_media_table(app)
 init_mailer(app)
 
 login_manager = LoginManager(app)
@@ -708,8 +713,13 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
 
-def save_compressed_image(file_storage, restaurant_slug):
-    """Recompresse une photo de plat (aplatie en RGB, format WEBP)."""
+def save_compressed_image(file_storage, restaurant_slug, restaurant_id=None):
+    """
+    Recompresse une photo de plat (aplatie en RGB, format WEBP) et
+    l'enregistre dans la base de données (stockage permanent, voir
+    media_store.py). Renvoie l'URL /media/<id>, ou None si le fichier
+    n'est pas une image valide.
+    """
     filename = secure_filename(file_storage.filename)
     if not allowed_file(filename):
         return None
@@ -724,16 +734,17 @@ def save_compressed_image(file_storage, restaurant_slug):
 
     img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
 
-    out_name = f"{restaurant_slug}_{int(datetime.utcnow().timestamp())}.webp"
-    out_path = os.path.join(UPLOAD_DIR, out_name)
-    img.save(out_path, "WEBP", quality=70)
-    return f"/static/uploads/{out_name}"
+    buf = io.BytesIO()
+    img.save(buf, "WEBP", quality=70)
+    return store_image(buf.getvalue(), "image/webp", kind="photo", restaurant_id=restaurant_id)
 
 
-def save_logo_image(file_storage, restaurant_slug):
+def save_logo_image(file_storage, restaurant_slug, restaurant_id=None):
     """
     Recompresse un logo de restaurant en préservant la transparence (PNG)
-    si l'image source en a une ; sinon conversion en WEBP.
+    si l'image source en a une ; sinon conversion en WEBP. Le logo est
+    enregistré dans la base de données (stockage permanent) : il ne
+    disparaît plus lors d'un redéploiement ou d'une mise en veille.
     """
     filename = secure_filename(file_storage.filename)
     if not allowed_file(filename):
@@ -751,16 +762,27 @@ def save_logo_image(file_storage, restaurant_slug):
 
     img.thumbnail((MAX_LOGO_SIDE, MAX_LOGO_SIDE))
 
-    timestamp = int(datetime.utcnow().timestamp())
+    buf = io.BytesIO()
     if has_alpha:
-        out_name = f"{restaurant_slug}-logo_{timestamp}.png"
-        out_path = os.path.join(UPLOAD_DIR, out_name)
-        img.save(out_path, "PNG", optimize=True)
+        img.save(buf, "PNG", optimize=True)
+        mimetype = "image/png"
     else:
-        out_name = f"{restaurant_slug}-logo_{timestamp}.webp"
-        out_path = os.path.join(UPLOAD_DIR, out_name)
-        img.save(out_path, "WEBP", quality=85)
-    return f"/static/uploads/{out_name}"
+        img.save(buf, "WEBP", quality=85)
+        mimetype = "image/webp"
+    return store_image(buf.getvalue(), mimetype, kind="logo", restaurant_id=restaurant_id)
+
+
+@app.route("/media/<int:image_id>")
+def media(image_id):
+    """
+    Sert une image stockée en base. Cache navigateur d'un an : une image
+    ne change jamais (un nouveau logo ou une nouvelle photo crée une
+    nouvelle entrée avec un nouvel id).
+    """
+    image = StoredImage.query.get_or_404(image_id)
+    response = Response(image.data, mimetype=image.mimetype)
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return response
 
 
 def tenant_or_404(slug):
@@ -1453,7 +1475,7 @@ def add_item():
     photo_url = None
     file = request.files.get("photo")
     if file and file.filename:
-        photo_url = save_compressed_image(file, restaurant.slug)
+        photo_url = save_compressed_image(file, restaurant.slug, restaurant.id)
 
     last = db.session.query(db.func.max(MenuItem.position)).filter_by(
         category_id=category.id).scalar() or 0
@@ -1508,8 +1530,9 @@ def edit_item(item_id):
 
     file = request.files.get("photo")
     if file and file.filename:
-        photo_url = save_compressed_image(file, restaurant.slug)
+        photo_url = save_compressed_image(file, restaurant.slug, restaurant.id)
         if photo_url:
+            delete_stored_image(item.photo_url)
             item.photo_url = photo_url
             changes.append("photo mise à jour")
 
@@ -1572,6 +1595,7 @@ def delete_item(item_id):
     item = MenuItem.query.filter_by(
         id=item_id, restaurant_id=restaurant_id).first_or_404()
     name = item.name
+    delete_stored_image(item.photo_url)
     MenuItemSuggestion.query.filter(
         (MenuItemSuggestion.menu_item_id == item.id) |
         (MenuItemSuggestion.suggested_item_id == item.id)
@@ -1644,11 +1668,12 @@ def admin_appearance_logo():
         flash("Veuillez choisir une image.", "error")
         return redirect(url_for("admin_appearance"))
 
-    logo_url = save_logo_image(file, restaurant.slug)
+    logo_url = save_logo_image(file, restaurant.slug, restaurant.id)
     if not logo_url:
         flash("Format d'image non reconnu. Utilisez un fichier JPG, PNG ou WEBP.", "error")
         return redirect(url_for("admin_appearance"))
 
+    delete_stored_image(restaurant.logo_url)
     restaurant.logo_url = logo_url
     log_menu_change(restaurant.id, current_user, "logo_updated",
                      "Logo du restaurant mis à jour.")
@@ -1662,6 +1687,7 @@ def admin_appearance_logo():
 @owner_required
 def admin_appearance_logo_delete():
     restaurant = active_restaurant()
+    delete_stored_image(restaurant.logo_url)
     restaurant.logo_url = None
     log_menu_change(restaurant.id, current_user, "logo_removed",
                      "Logo du restaurant supprimé.")
