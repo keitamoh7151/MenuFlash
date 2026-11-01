@@ -1987,6 +1987,8 @@ def _ensure_security_defaults():
     except Exception:
         db.session.rollback()
 
+from backups import init_backups
+init_backups(app, log_audit=log_audit, super_admin_required=super_admin_required)
 
 init_super_admin(
     app,

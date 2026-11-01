@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Sauvegardes — Super-admin{% endblock %}
+{% macro size(b) %}{% if b is none %}—{% elif b < 1048576 %}{{ '%.0f' % (b / 1024) }} Ko{% else %}{{ '%.1f' % (b / 1048576) }} Mo{% endif %}{% endmacro %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 1180px;">
+
+  {% if stale %}
+    <div class="alert alert-danger small"><i class="bi bi-exclamation-octagon-fill me-1"></i>
+      <strong>Aucune sauvegarde récente.</strong> {% if last %}La dernière date du {{ last.strftime('%d/%m/%Y à %H:%M') }} (UTC).{% else %}Aucune sauvegarde n'a encore été faite.{% endif %}
+      Créez-en une maintenant et vérifiez la planification ci-dessous.</div>
+  {% endif %}
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-6 col-lg-3"><div class="card mf-stat-card p-3 h-100">
+      <div class="small text-secondary text-uppercase">Dernière sauvegarde</div>
+      {% if last %}
+        {% set h = ((now - last).total_seconds() // 3600)|int %}
+        <div class="mf-stat-num fs-5">{{ last.strftime('%d/%m %H:%M') }}</div>
+        <div class="small {{ 'text-danger' if stale else 'text-secondary' }}">il y a {{ h }} h · toutes les {{ interval }} h</div>
+      {% else %}<div class="mf-stat-num fs-5 text-danger">Jamais</div>{% endif %}
+    </div></div>
+    <div class="col-md-6 col-lg-3"><div class="card mf-stat-card p-3 h-100">
+      <div class="small text-secondary text-uppercase">Copie hors site</div>
+      {% if offsite_ok %}<div class="mf-stat-num fs-5 text-success">Configurée</div><div class="small text-secondary">{{ keep_offsite }} copies conservées</div>
+      {% else %}<div class="mf-stat-num fs-5 text-danger">Non configurée</div><div class="small text-secondary">Manque : {{ offsite_missing|join(', ') }}</div>{% endif %}
+    </div></div>
+    <div class="col-md-6 col-lg-3"><div class="card mf-stat-card p-3 h-100">
+      <div class="small text-secondary text-uppercase">Chiffrement</div>
+      {% if encryption_ok %}<div class="mf-stat-num fs-5 text-success">Activé</div><div class="small text-secondary">Copies hors site et téléchargements chiffrés</div>
+      {% else %}<div class="mf-stat-num fs-5 text-danger">Désactivé</div><div class="small text-secondary">BACKUP_ENCRYPTION_KEY non définie</div>{% endif %}
+    </div></div>
+    <div class="col-md-6 col-lg-3"><div class="card mf-stat-card p-3 h-100">
+      <div class="small text-secondary text-uppercase">Planification</div>
+      <div class="small mt-1"><i class="bi bi-{{ 'check-circle-fill text-success' if auto_on else 'x-circle-fill text-danger' }} me-1"></i>Interne (pendant l'activité)</div>
+      <div class="small"><i class="bi bi-{{ 'check-circle-fill text-success' if cron_ok else 'x-circle-fill text-danger' }} me-1"></i>Nocturne (GitHub Actions)</div>
+    </div></div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-8">
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div><h2 class="mf-section-title fs-6 mb-1">Copies locales</h2>
+            <p class="small text-secondary mb-0">Stockées dans la base : protègent contre les erreurs de manipulation. Les {{ keep_local }} plus récentes sont conservées.</p></div>
+          <form method="post" action="{{ url_for('super_admin_backup_create') }}" data-mf-guard>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-cloud-arrow-up me-1"></i>Sauvegarder maintenant</button>
+          </form>
+        </div>
+        <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+          <thead class="small text-secondary"><tr><th>N°</th><th>Date (UTC)</th><th>Type</th><th>Taille</th><th>Lignes</th><th>Hors site</th><th></th></tr></thead>
+          <tbody>
+          {% for b in backups %}
+            <tr class="small">
+              <td>{{ b.id }}</td>
+              <td>{{ b.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+              <td>{{ kind_labels.get(b.kind, b.kind) }}<div class="text-secondary">{{ b.created_by }}</div></td>
+              <td>{{ size(b.size_bytes) }}</td>
+              <td>{{ b.rows_count }}</td>
+              <td><span class="badge {{ offsite_labels.get(b.offsite_status, ('?', 'mf-sa-badge-muted'))[1] }}" title="{{ b.offsite_error or '' }}">{{ offsite_labels.get(b.offsite_status, (b.offsite_status, ''))[0] }}</span></td>
+              <td class="text-end text-nowrap">
+                <a class="btn btn-sm btn-outline-secondary border-0" href="{{ url_for('super_admin_backup_download', backup_id=b.id) }}" title="Télécharger sur mon PC"><i class="bi bi-download"></i></a>
+                <form method="post" action="{{ url_for('super_admin_backup_test') }}" class="d-inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="source" value="local"><input type="hidden" name="backup_id" value="{{ b.id }}">
+                  <button class="btn btn-sm btn-outline-secondary border-0" type="submit" title="Tester (sans rien modifier)"><i class="bi bi-clipboard-check"></i></button></form>
+                {% if offsite_ok and b.offsite_status != 'ok' %}
+                <form method="post" action="{{ url_for('super_admin_backup_offsite', backup_id=b.id) }}" class="d-inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-secondary border-0" type="submit" title="Envoyer hors site"><i class="bi bi-cloud-upload"></i></button></form>
+                {% endif %}
+                <button class="btn btn-sm btn-outline-danger border-0" type="button" title="Restaurer"
+                        data-bs-toggle="modal" data-bs-target="#restore-modal"
+                        data-source="local" data-backup-id="{{ b.id }}" data-label="la copie locale n°{{ b.id }} du {{ b.created_at.strftime('%d/%m/%Y %H:%M') }}">
+                  <i class="bi bi-arrow-counterclockwise"></i></button>
+                <form method="post" action="{{ url_for('super_admin_backup_delete', backup_id=b.id) }}" class="d-inline mf-confirm" data-confirm-message="Supprimer la copie locale n°{{ b.id }} ?">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-secondary border-0" type="submit" title="Supprimer"><i class="bi bi-trash3"></i></button></form>
+              </td>
+            </tr>
+          {% else %}<tr><td colspan="7" class="small text-secondary">Aucune sauvegarde pour le moment.</td></tr>{% endfor %}
+          </tbody></table></div>
+      </div></div>
+
+      <div class="card mf-section-card"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-1">Copies hors site (chiffrées)</h2>
+        <p class="small text-secondary">Stockées chez un autre fournisseur que Render : protègent contre la perte de la base elle-même.</p>
+        {% if not offsite_ok %}
+          <p class="small mb-0">Non configuré. Ajoutez dans Render les variables <code>BACKUP_S3_ENDPOINT</code>, <code>BACKUP_S3_BUCKET</code>, <code>BACKUP_S3_ACCESS_KEY</code>, <code>BACKUP_S3_SECRET_KEY</code> et <code>BACKUP_ENCRYPTION_KEY</code>.</p>
+        {% elif offsite_error %}
+          <div class="alert alert-danger small mb-0">Connexion au stockage hors site impossible : {{ offsite_error }}</div>
+        {% else %}
+          <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+            <thead class="small text-secondary"><tr><th>Fichier</th><th>Date</th><th>Taille</th><th></th></tr></thead>
+            <tbody>
+            {% for o in offsite_items %}
+              <tr class="small">
+                <td class="text-break">{{ o.name }}</td>
+                <td>{{ o.date.strftime('%d/%m/%Y %H:%M') if o.date else '—' }}</td>
+                <td>{{ size(o.size) }}</td>
+                <td class="text-end text-nowrap">
+                  <form method="post" action="{{ url_for('super_admin_backup_test') }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="source" value="offsite"><input type="hidden" name="key" value="{{ o.key }}">
+                    <button class="btn btn-sm btn-outline-secondary border-0" type="submit" title="Tester"><i class="bi bi-clipboard-check"></i></button></form>
+                  <button class="btn btn-sm btn-outline-danger border-0" type="button" title="Restaurer"
+                          data-bs-toggle="modal" data-bs-target="#restore-modal"
+                          data-source="offsite" data-key="{{ o.key }}" data-label="la copie hors site {{ o.name }}">
+                    <i class="bi bi-arrow-counterclockwise"></i></button>
+                </td>
+              </tr>
+            {% else %}<tr><td colspan="4" class="small text-secondary">Aucune copie hors site pour le moment.</td></tr>{% endfor %}
+            </tbody></table></div>
+        {% endif %}
+      </div></div>
+    </div>
+
+    <div class="col-lg-4">
+      <div class="card mf-section-card mb-3 border-danger-subtle"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-2">Restaurer depuis un fichier</h2>
+        <p class="small text-secondary">Fichier <code>.mfbak</code> (chiffré) ou <code>.json.gz</code>, {{ max_upload_mb }} Mo maximum.</p>
+        <form method="post" action="{{ url_for('super_admin_backup_restore_file') }}" enctype="multipart/form-data" data-mf-guard autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="source" value="file">
+          <input type="file" name="file" class="form-control form-control-sm mb-2" accept=".mfbak,.gz" required>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="test_only" value="1" id="test-only" checked>
+            <label class="form-check-label small" for="test-only">Seulement tester le fichier (ne rien modifier)</label>
+          </div>
+          <div id="file-restore-fields" class="d-none">
+            <input type="text" name="confirm" class="form-control form-control-sm mb-2" placeholder="Tapez RESTAURER" autocomplete="off" spellcheck="false">
+            <input type="password" name="password" class="form-control form-control-sm mb-2" placeholder="Votre mot de passe" autocomplete="current-password">
+          </div>
+          <button class="btn btn-sm btn-outline-danger w-100" type="submit" id="file-submit">Tester le fichier</button>
+        </form>
+      </div></div>
+
+      <div class="card mf-section-card"><div class="card-body small">
+        <h2 class="mf-section-title fs-6 mb-2">Bonnes pratiques</h2>
+        <ul class="ps-3 mb-0">
+          <li>Testez une sauvegarde chaque semaine (icône <i class="bi bi-clipboard-check"></i>).</li>
+          <li>Téléchargez une copie sur votre PC une fois par mois.</li>
+          <li>Gardez la clé <code>BACKUP_ENCRYPTION_KEY</code> dans un gestionnaire de mots de passe : sans elle, les copies chiffrées sont illisibles.</li>
+          <li>Une restauration remplace <strong>toutes</strong> les données, y compris les mots de passe : vous serez déconnecté.</li>
+        </ul>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="restore-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form method="post" action="{{ url_for('super_admin_backup_restore') }}" class="modal-content" data-mf-guard autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="source" id="restore-source">
+      <input type="hidden" name="backup_id" id="restore-backup-id">
+      <input type="hidden" name="key" id="restore-key">
+      <div class="modal-header border-0"><h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>Restaurer les données</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <p class="small">Vous allez remplacer <strong>toutes les données actuelles</strong> (restaurants, comptes, menus, commandes, paiements…) par celles de <strong id="restore-label"></strong>.</p>
+        <ul class="small text-secondary ps-3">
+          <li>Une sauvegarde de sécurité est faite automatiquement juste avant.</li>
+          <li>Les modifications faites depuis cette sauvegarde seront perdues.</li>
+          <li>Vous serez déconnecté à la fin.</li>
+        </ul>
+        <label class="form-label small" for="restore-confirm">Tapez <strong>RESTAURER</strong> pour confirmer</label>
+        <input type="text" name="confirm" id="restore-confirm" class="form-control mb-2" autocomplete="off" spellcheck="false" required>
+        <label class="form-label small" for="restore-password">Votre mot de passe</label>
+        <input type="password" name="password" id="restore-password" class="form-control" autocomplete="current-password" required>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-danger">Restaurer</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var modal = document.getElementById("restore-modal");
+  if (modal) {
+    modal.addEventListener("show.bs.modal", function (e) {
+      var b = e.relatedTarget;
+      if (!b) return;
+      document.getElementById("restore-source").value = b.dataset.source || "";
+      document.getElementById("restore-backup-id").value = b.dataset.backupId || "";
+      document.getElementById("restore-key").value = b.dataset.key || "";
+      document.getElementById("restore-label").textContent = b.dataset.label || "";
+      document.getElementById("restore-confirm").value = "";
+      document.getElementById("restore-password").value = "";
+    });
+  }
+  var testOnly = document.getElementById("test-only");
+  if (testOnly) {
+    var fields = document.getElementById("file-restore-fields");
+    var submit = document.getElementById("file-submit");
+    var sync = function () {
+      fields.classList.toggle("d-none", testOnly.checked);
+      fields.querySelectorAll("input").forEach(function (i) { i.required = !testOnly.checked; });
+      submit.textContent = testOnly.checked ? "Tester le fichier" : "Restaurer ce fichier";
+      submit.classList.toggle("btn-danger", !testOnly.checked);
+      submit.classList.toggle("btn-outline-danger", testOnly.checked);
+    };
+    testOnly.addEventListener("change", sync);
+    sync();
+  }
+});
+</script>
+{% endblock %}
