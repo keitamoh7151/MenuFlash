@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Vérification en deux étapes — MenuFlash Mini{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card p-2">
+    <div class="card-body p-4">
+      <div class="text-center mb-4">
+        <i class="bi bi-phone-fill" style="font-size: 1.8rem; color: var(--mf-accent);"></i>
+        <h1 class="h5 fw-bold mt-2 mb-1">Vérification en deux étapes</h1>
+        <p class="text-secondary small mb-0">
+          {% if mode == 'recovery' %}Saisissez l'un de vos codes de secours ({{ recovery_left }} restant{{ 's' if recovery_left != 1 }}).
+          {% else %}Ouvrez votre application d'authentification et saisissez le code affiché.{% endif %}
+        </p>
+      </div>
+      <form method="post" data-mf-guard autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="mode" value="{{ 'recovery' if mode == 'recovery' else 'code' }}">
+        {% if mode == 'recovery' %}
+          <input type="text" name="recovery_code" class="form-control form-control-lg text-center mb-3"
+                 maxlength="12" placeholder="ABCD-EFGH" autocapitalize="characters" spellcheck="false" required autofocus>
+        {% else %}
+          <input type="text" name="code" class="form-control form-control-lg text-center mb-3"
+                 inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code"
+                 placeholder="123 456" required autofocus style="letter-spacing: .3em;">
+        {% endif %}
+        <button type="submit" class="btn btn-primary w-100 py-2">Vérifier</button>
+      </form>
+      <div class="d-flex justify-content-between small mt-3">
+        {% if mode == 'recovery' %}
+          <a href="{{ url_for('two_factor_verify') }}">Utiliser l'application</a>
+        {% else %}
+          <a href="{{ url_for('two_factor_verify', mode='recovery') }}">Téléphone perdu ? Code de secours</a>
+        {% endif %}
+        <a href="{{ url_for('admin_logout') }}" class="text-secondary">Se déconnecter</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

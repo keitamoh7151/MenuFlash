@@ -36,12 +36,13 @@
         <a class="btn btn-sm {{ 'btn-primary' if ep == 'super_admin_communication' else 'btn-outline-secondary' }}" href="{{ url_for('super_admin_communication') }}">
           <i class="bi bi-megaphone me-1"></i>Communication</a>
         <div class="dropdown">
-          <button class="btn btn-sm dropdown-toggle {{ 'btn-primary' if ep in ('super_admin_health', 'super_admin_security_log', 'super_admin_backups') else 'btn-outline-secondary' }}" type="button" data-bs-toggle="dropdown">
+          <button class="btn btn-sm dropdown-toggle {{ 'btn-primary' if ep in ('super_admin_health', 'super_admin_security_log', 'super_admin_backups', 'two_factor_manage') else 'btn-outline-secondary' }}" type="button" data-bs-toggle="dropdown">
             <i class="bi bi-activity me-1"></i>Système</button>
           <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
             <li><a class="dropdown-item" href="{{ url_for('super_admin_backups') }}"><i class="bi bi-database-check me-2"></i>Sauvegardes</a></li>
             <li><a class="dropdown-item" href="{{ url_for('super_admin_health') }}"><i class="bi bi-heart-pulse me-2"></i>Santé technique</a></li>
             <li><a class="dropdown-item" href="{{ url_for('super_admin_security_log') }}"><i class="bi bi-shield-lock me-2"></i>Journal de sécurité</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('two_factor_manage') }}"><i class="bi bi-phone me-2"></i>Double authentification</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="{{ url_for('change_password') }}"><i class="bi bi-key me-2"></i>Mot de passe</a></li>
             <li><a class="dropdown-item" href="{{ url_for('admin_logout') }}"><i class="bi bi-box-arrow-right me-2"></i>Déconnexion</a></li>
@@ -51,3 +52,4 @@
     </div>
   </div>
 </nav>
+

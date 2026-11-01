@@ -2001,6 +2001,9 @@ init_super_admin(
     min_password_length=MIN_PASSWORD_LENGTH,
 )
 
+from two_factor import init_two_factor
+init_two_factor(app, log_audit=log_audit, limiter=limiter)
+
 
 if __name__ == "__main__":
     with app.app_context():
@@ -2008,4 +2011,5 @@ if __name__ == "__main__":
         _ensure_schema_migrations()
         _ensure_security_defaults()
     app.run(debug=True, port=5000, host="0.0.0.0", threaded=True)
+
 

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Double authentification — Super-admin{% endblock %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 760px;">
+  <div class="card mf-section-card mb-3"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-3">Double authentification</h2>
+    <div class="d-flex justify-content-between small border-bottom py-2"><span>État</span>
+      <span class="badge mf-sa-badge-ok">Activée</span></div>
+    <div class="d-flex justify-content-between small border-bottom py-2"><span>Activée le</span>
+      <strong>{{ rec.enabled_at.strftime('%d/%m/%Y %H:%M') if rec and rec.enabled_at else '—' }} (UTC)</strong></div>
+    <div class="d-flex justify-content-between small py-2"><span>Codes de secours restants</span>
+      <strong class="{{ 'text-danger' if rec and rec.recovery_left <= 2 }}">{{ rec.recovery_left if rec else 0 }} / 10</strong></div>
+  </div></div>
+
+  <div class="row g-3">
+    <div class="col-md-6"><div class="card mf-section-card h-100"><div class="card-body">
+      <h3 class="mf-section-title fs-6 mb-2">Nouveaux codes de secours</h3>
+      <p class="small text-secondary">Les anciens codes seront invalidés.</p>
+      <form method="post" action="{{ url_for('two_factor_regenerate') }}" data-mf-guard autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="code" class="form-control mb-2 text-center" inputmode="numeric" maxlength="7"
+               autocomplete="one-time-code" placeholder="Code de l'application" required>
+        <button class="btn btn-outline-secondary w-100" type="submit">Générer</button>
+      </form>
+    </div></div></div>
+    <div class="col-md-6"><div class="card mf-section-card h-100"><div class="card-body">
+      <h3 class="mf-section-title fs-6 mb-2">Changer de téléphone</h3>
+      <p class="small text-secondary">Vous scannerez un nouveau QR code.</p>
+      <form method="post" action="{{ url_for('two_factor_reconfigure') }}" data-mf-guard autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="code" class="form-control mb-2 text-center" inputmode="numeric" maxlength="7"
+               autocomplete="one-time-code" placeholder="Code de l'application" required>
+        <input type="password" name="password" class="form-control mb-2" autocomplete="current-password"
+               placeholder="Votre mot de passe" required>
+        <button class="btn btn-outline-secondary w-100" type="submit">Continuer</button>
+      </form>
+    </div></div></div>
+  </div>
+</div>
+{% endblock %}
