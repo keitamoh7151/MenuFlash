@@ -1987,6 +1987,11 @@ def _ensure_security_defaults():
     except Exception:
         db.session.rollback()
 
+from composition import init_composition
+init_composition(app, owner_required=owner_required,
+                 active_restaurant=active_restaurant,
+                 log_menu_change=log_menu_change)
+
 from backups import init_backups
 init_backups(app, log_audit=log_audit, super_admin_required=super_admin_required)
 

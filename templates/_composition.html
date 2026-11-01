@@ -1,0 +1,63 @@
+{# ==========================================================================
+   Composition des plats — inclus UNE fois dans base.html (avant </body>).
+   S'active uniquement sur le tableau de bord (édition) et le menu public
+   (affichage). Les données sont passées en JSON échappé par |tojson et
+   insérées dans la page par static/composition.js via textContent.
+   ========================================================================== #}
+{% if mf_composition %}
+<script id="mf-composition-data" type="application/json">{{ mf_composition|tojson }}</script>
+
+{% if mf_composition.mode == 'admin' %}
+<div class="modal fade" id="mf-composition-modal" tabindex="-1" aria-labelledby="mf-composition-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <form method="post" id="mf-composition-form" class="modal-content" data-mf-guard autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header border-0">
+        <h5 class="modal-title" id="mf-composition-title"><i class="bi bi-list-check me-2"></i>Composition — <span id="mf-composition-name"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <label for="mf-composition-ingredients" class="form-label small fw-semibold">Ingrédients</label>
+        <textarea id="mf-composition-ingredients" name="ingredients" class="form-control" rows="4"
+                  maxlength="2500" spellcheck="true"
+                  placeholder="Un ingrédient par ligne, ou séparés par des virgules&#10;Ex : riz, viande de bœuf, oignons, tomate, huile d'arachide"></textarea>
+        <div class="d-flex justify-content-between small text-secondary mt-1">
+          <span>Lettres, chiffres, espaces et ' - . ( ) / % &amp; uniquement.</span>
+          <span><span id="mf-composition-count">0</span> / {{ mf_composition.max_ingredients }}</span>
+        </div>
+        <div class="mf-comp-preview mt-2" id="mf-composition-preview" aria-live="polite"></div>
+
+        <fieldset class="mt-3">
+          <legend class="form-label small fw-semibold mb-1"><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i>Allergènes présents</legend>
+          <div class="mf-check-grid">
+            {% for key, label in mf_allergen_choices %}
+              <div class="form-check mf-check">
+                <input class="form-check-input" type="checkbox" name="allergens" value="{{ key }}" id="mf-al-{{ key }}">
+                <label class="form-check-label" for="mf-al-{{ key }}">{{ label }}</label>
+              </div>
+            {% endfor %}
+          </div>
+        </fieldset>
+
+        <fieldset class="mt-3">
+          <legend class="form-label small fw-semibold mb-1"><i class="bi bi-patch-check-fill me-1 text-success"></i>Mentions</legend>
+          <div class="mf-check-grid">
+            {% for key, label in mf_tag_choices %}
+              <div class="form-check mf-check">
+                <input class="form-check-input" type="checkbox" name="tags" value="{{ key }}" id="mf-tag-{{ key }}">
+                <label class="form-check-label" for="mf-tag-{{ key }}">{{ label }}</label>
+              </div>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <p class="small text-secondary mt-3 mb-0"><i class="bi bi-info-circle me-1"></i>Ces informations s'affichent sous le plat dans votre menu public. Vous êtes responsable de leur exactitude.</p>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endif %}

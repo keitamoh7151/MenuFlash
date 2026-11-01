@@ -1,0 +1,84 @@
+/* ==========================================================================
+   MenuFlash Mini — cases à cocher lisibles + composition des plats
+   ========================================================================== */
+
+/* ---------- Cases à cocher : correctif global ----------
+   La règle « .mf-suggestion-check { padding: 3px 0 } » supprimait la marge
+   gauche réservée par Bootstrap à la case : celle-ci sortait du cadre et
+   était coupée. On la rétablit, et on rend toutes les cases bien visibles. */
+.mf-suggestion-check,
+.mf-check {
+  padding: 6px 8px 6px 2.1rem !important;
+  margin: 0;
+  border-radius: 8px;
+  min-height: 2rem;
+  display: flex;
+  align-items: center;
+}
+.mf-suggestion-check:hover, .mf-check:hover { background: rgba(0, 0, 0, .035); }
+.mf-suggestion-check .form-check-input,
+.mf-check .form-check-input {
+  width: 1.2rem;
+  height: 1.2rem;
+  margin-left: -1.65rem;
+  margin-top: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.mf-suggestion-check .form-check-label,
+.mf-check .form-check-label { cursor: pointer; padding-left: .2rem; line-height: 1.3; }
+
+.form-check-input {
+  border: 2px solid #9A968E;
+  background-color: #fff;
+}
+.form-check-input:checked {
+  background-color: var(--mf-accent);
+  border-color: var(--mf-accent);
+}
+.form-check-input:focus {
+  border-color: var(--mf-accent);
+  box-shadow: 0 0 0 .2rem color-mix(in srgb, var(--mf-accent) 30%, transparent);
+}
+.mf-suggestion-list { padding: 6px !important; }
+
+/* ---------- Grille des allergènes / mentions (modale) ---------- */
+.mf-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 2px 8px;
+  background: var(--mf-bg);
+  border: 1px solid var(--mf-border);
+  border-radius: 10px;
+  padding: 6px;
+}
+.mf-comp-preview { display: flex; flex-wrap: wrap; gap: 6px; min-height: 0; }
+.mf-comp-preview:empty { display: none; }
+
+/* ---------- Puces (aperçu, tableau de bord et menu public) ---------- */
+.mf-comp-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .74rem; font-weight: 600; line-height: 1.2;
+  padding: 3px 9px; border-radius: 999px;
+  background: #fff; border: 1px solid var(--mf-border); color: var(--mf-ink);
+  max-width: 100%; overflow-wrap: anywhere;
+}
+.mf-comp-chip--allergen { background: var(--mf-danger-bg); border-color: transparent; color: var(--mf-danger); }
+.mf-comp-chip--tag { background: var(--mf-success-bg); border-color: transparent; color: var(--mf-success); }
+
+/* ---------- Bouton « Composition » du tableau de bord ---------- */
+.mf-comp-btn { color: var(--mf-ink-soft); font-size: .95rem; position: relative; }
+.mf-comp-btn:hover { background: var(--mf-accent-light); color: var(--mf-accent-dark); }
+.mf-comp-btn.has-data::after {
+  content: ""; position: absolute; top: 4px; right: 4px;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--mf-success);
+}
+.mf-comp-summary { font-size: .78rem; color: var(--mf-ink-soft); margin-top: 2px; }
+
+/* ---------- Menu public ---------- */
+.mf-item-composition { margin-top: 6px; width: 100%; }
+.mf-item-composition .mf-comp-ingredients {
+  font-size: .8rem; color: var(--mf-ink-soft); margin: 0 0 4px; line-height: 1.35;
+}
+.mf-item-composition .mf-comp-ingredients strong { color: var(--mf-ink); font-weight: 600; }
+.mf-item-composition .mf-comp-chips { display: flex; flex-wrap: wrap; gap: 4px; }
