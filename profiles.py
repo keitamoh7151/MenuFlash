@@ -22,11 +22,16 @@ Ce que fait le module
    être envoyée par WhatsApp en un clic.
 5. SUPER-ADMIN : nom, téléphone (lien WhatsApp), ville et type de cuisine dans
    la liste des clients et dans la fiche client.
+6. TÉLÉPHONES PAR PAYS (phone_utils.py) : chaque champ téléphone a un
+   sélecteur de pays. Le numéro doit respecter le format exact de ce pays
+   (librairie libphonenumber de Google) et il est enregistré au format
+   international (« +223 76 12 34 56 »). Vérification en direct pendant la
+   saisie via /telephone/verifier, et vérification définitive côté serveur.
 
 Sécurité
 --------
 - Tous les champs sont validés côté serveur : longueur, caractères autorisés
-  (pas de < > { } ` \\), téléphone au format international, liens Facebook /
+  (pas de < > { } ` \\), téléphone valide pour le pays choisi, liens Facebook /
   Instagram limités à ces deux sites en https, listes fermées (poste, cuisine).
 - Profil du restaurant : modifiable uniquement par le gestionnaire, CSRF,
   chaque modification est notée dans l'historique.
@@ -41,12 +46,13 @@ import unicodedata
 from datetime import datetime
 from urllib.parse import urlparse
 
-from flask import render_template, request, redirect, url_for, flash, session
+from flask import render_template, request, redirect, url_for, flash, session, jsonify
 from flask_login import current_user, user_logged_in
 from sqlalchemy import event
 from werkzeug.datastructures import ImmutableMultiDict
 
 from models import db, User, Restaurant
+from phone_utils import check_phone, register_phone_helpers
 
 logger = logging.getLogger("menuflash.profiles")
 
@@ -127,14 +133,12 @@ def validate_text(raw, label, max_len):
     return value, None
 
 
-def validate_phone(raw, label="Le téléphone", required=False):
-    value = re.sub(r"\s+", " ", raw or "").strip()
-    if not value:
-        return "", (f"{label} est obligatoire." if required else None)
-    digits = re.sub(r"\D", "", value)
-    if not re.fullmatch(r"\+?[0-9 ()\-]+", value) or not (8 <= len(digits) <= 15):
-        return value, f"{label} n'est pas valide (8 à 15 chiffres, ex : +223 70 00 00 00)."
-    return value, None
+def validate_phone(raw, label="Le téléphone", required=False, country=None):
+    """
+    Téléphone validé selon le pays choisi (champ <nom>_country du formulaire).
+    Renvoie (numéro au format international ou "", erreur ou None).
+    """
+    return check_phone(raw, country, label=label, required=required)
 
 
 def validate_social(raw, network):
@@ -162,7 +166,7 @@ def whatsapp_number(phone):
     digits = re.sub(r"\D", "", phone or "")
     if not digits:
         return None
-    if len(digits) == 8:                       # numéro malien sans indicatif
+    if len(digits) == 8:                       # ancien numéro malien enregistré sans indicatif
         digits = "223" + digits
     return digits
 
@@ -183,6 +187,12 @@ def init_profiles(app, *, owner_required, active_restaurant, log_menu_change=Non
     app.jinja_env.filters["wa_number"] = whatsapp_number
     app.jinja_env.globals["mf_jobs"] = JOBS
     app.jinja_env.globals["mf_cuisines"] = CUISINES
+    register_phone_helpers(app)
+
+    # L'ancienne vérification générique (8 à 15 chiffres, sans notion de pays) de
+    # security_forms est remplacée par la vérification par pays faite ici. On la
+    # neutralise pour ne pas afficher deux messages différents pour le même champ.
+    sf.validate_phone = lambda raw: (re.sub(r"\s+", " ", raw or "").strip(), None)
 
     def user_profile(user_id, create=False):
         p = db.session.get(UserProfile, user_id)
@@ -212,6 +222,16 @@ def init_profiles(app, *, owner_required, active_restaurant, log_menu_change=Non
             ~UserProfile.user_id.in_(db.select(User.__table__.c.id))))
 
     # ======================================================================
+    # Vérification en direct pendant la saisie (même règle que le serveur)
+    # ======================================================================
+    @app.route("/telephone/verifier")
+    def phone_check():
+        raw = (request.args.get("numero") or "")[:40]
+        country = (request.args.get("pays") or "")[:4]
+        value, err = check_phone(raw, country, label="Ce numéro", required=False)
+        return jsonify({"ok": err is None, "formatted": value, "error": err})
+
+    # ======================================================================
     # 1. Inscription
     # ======================================================================
     original_signup_handler = sf._HANDLERS["signup"]
@@ -221,6 +241,7 @@ def init_profiles(app, *, owner_required, active_restaurant, log_menu_change=Non
         prefill = dict(prefill or {})
         for key in ("first_name", "last_name", "city"):
             prefill[key] = (form.get(key) or "")[:60]
+        prefill["phone_country"] = (form.get("phone_country") or "")[:4]
         if errors and len(errors) == 1 and not form.get("email"):
             return errors, prefill
         extra = []
@@ -228,7 +249,8 @@ def init_profiles(app, *, owner_required, active_restaurant, log_menu_change=Non
             _, err = validate_name(form.get(field), label)
             if err:
                 extra.append(err)
-        _, err = validate_phone(form.get("phone"), "Le téléphone (WhatsApp)", required=True)
+        _, err = validate_phone(form.get("phone"), "Le téléphone (WhatsApp)", required=True,
+                                country=form.get("phone_country"))
         if err and err not in errors:
             extra.append(err)
         _, err = validate_place(form.get("city"), "La ville", required=True)
@@ -246,12 +268,17 @@ def init_profiles(app, *, owner_required, active_restaurant, log_menu_change=Non
             email = sf.normalize_email(request.form.get("email"))
             if current_user.email == email and db.session.get(UserProfile, current_user.id) is None:
                 try:
+                    phone = validate_phone(request.form.get("phone"),
+                                           country=request.form.get("phone_country"))[0] or None
                     up = user_profile(current_user.id, create=True)
                     up.first_name = validate_name(request.form.get("first_name"), "")[0]
                     up.last_name = validate_name(request.form.get("last_name"), "")[0]
-                    up.phone = validate_phone(request.form.get("phone"))[0] or None
+                    up.phone = phone
                     rp = restaurant_profile(current_user.restaurant_id, create=True)
                     rp.city = validate_place(request.form.get("city"), "")[0] or None
+                    restaurant = db.session.get(Restaurant, current_user.restaurant_id)
+                    if restaurant and phone:
+                        restaurant.phone = phone          # même format international partout
                     db.session.commit()
                 except Exception:
                     db.session.rollback()
@@ -273,11 +300,13 @@ def init_profiles(app, *, owner_required, active_restaurant, log_menu_change=Non
             checks = [
                 ("first_name", validate_name(f.get("first_name"), "Le prénom")),
                 ("last_name", validate_name(f.get("last_name"), "Le nom")),
-                ("phone", validate_phone(f.get("phone"), "Votre téléphone (WhatsApp)", required=True)),
+                ("phone", validate_phone(f.get("phone"), "Votre téléphone (WhatsApp)", required=True,
+                                         country=f.get("phone_country"))),
                 ("city", validate_place(f.get("city"), "La ville", required=True)),
                 ("district", validate_place(f.get("district"), "Le quartier")),
                 ("address", validate_text(f.get("address"), "L'adresse", 200)),
-                ("public_phone", validate_phone(f.get("public_phone"), "Le numéro affiché aux clients")),
+                ("public_phone", validate_phone(f.get("public_phone"), "Le numéro affiché aux clients",
+                                                country=f.get("public_phone_country"))),
                 ("description", validate_text(f.get("description"), "La description", 300)),
                 ("facebook", validate_social(f.get("facebook"), "facebook")),
                 ("instagram", validate_social(f.get("instagram"), "instagram")),
@@ -300,6 +329,7 @@ def init_profiles(app, *, owner_required, active_restaurant, log_menu_change=Non
                 for e in errors:
                     flash(e, "error")
                 return redirect(url_for("admin_profile"))
+
             up = user_profile(current_user.id, create=True)
             up.first_name, up.last_name = values["first_name"], values["last_name"]
             up.phone = values["phone"] or None
@@ -357,7 +387,7 @@ def init_profiles(app, *, owner_required, active_restaurant, log_menu_change=Non
             errors.append(err)
         if form.get("job") not in JOBS:
             errors.append("Choisissez le poste : Cuisine ou Serveur.")
-        _, err = validate_phone(form.get("phone"))
+        _, err = validate_phone(form.get("phone"), "Le téléphone", country=form.get("phone_country"))
         if err:
             errors.append(err)
         return errors, None
@@ -389,7 +419,8 @@ def init_profiles(app, *, owner_required, active_restaurant, log_menu_change=Non
                 up.first_name = validate_name(request.form.get("first_name"), "")[0] or None
                 up.last_name = validate_name(request.form.get("last_name"), "", required=False)[0] or None
                 up.job = request.form.get("job") if request.form.get("job") in JOBS else None
-                up.phone = validate_phone(request.form.get("phone"))[0] or None
+                up.phone = validate_phone(request.form.get("phone"),
+                                          country=request.form.get("phone_country"))[0] or None
                 db.session.commit()
                 invite = session.get("mf_last_invite")
                 if invite and invite.get("email") == email:

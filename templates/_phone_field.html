@@ -1,0 +1,37 @@
+{#
+  Champ téléphone avec sélecteur de pays (MenuFlash Mini).
+
+  Utilisation :
+    {% from "_phone_field.html" import phone_field %}
+    {{ phone_field("phone", "Téléphone (WhatsApp)", id="pf-phone", value=up.phone if up else "", required=True) }}
+
+  Le formulaire envoie deux champs : <name> (le numéro) et <name>_country (ML, SN, CA…).
+  La vérification qui fait foi est faite par le serveur (phone_utils.py).
+#}
+{% macro phone_field(name, label, id=None, value="", country=None, required=False,
+                     label_class="form-label small fw-semibold", optional_hint=False, help=None) %}
+  {%- set field_id = id or (name ~ "-input") -%}
+  {%- if country -%}
+    {%- set sel_country, sel_number = country, (value or "") -%}
+  {%- else -%}
+    {%- set sel_country, sel_number = split_phone(value) -%}
+  {%- endif -%}
+  <div class="mf-phone-field" data-mf-phone data-check-url="{{ url_for('phone_check') }}">
+    <label for="{{ field_id }}" class="{{ label_class }}">{{ label }}
+      {%- if optional_hint %} <span class="text-secondary">(optionnel)</span>{% endif %}</label>
+    <div class="mf-phone-group">
+      <select name="{{ name }}_country" class="form-select mf-phone-country" data-mf-phone-country
+              aria-label="Pays du numéro : {{ label }}">
+        {% for code, cname, dial, example in PHONE_COUNTRIES %}
+          <option value="{{ code }}" data-dial="{{ dial }}" data-example="{{ example }}"
+                  {{ 'selected' if code == sel_country }}>{{ cname }} ({{ dial }})</option>
+        {% endfor %}
+      </select>
+      <input type="tel" id="{{ field_id }}" name="{{ name }}" value="{{ sel_number }}"
+             class="form-control mf-phone-number" data-mf-phone-input
+             inputmode="tel" autocomplete="tel-national" maxlength="30"
+             aria-describedby="{{ field_id }}-msg" {{ 'required' if required }}>
+    </div>
+    <div class="mf-phone-msg form-text" id="{{ field_id }}-msg" data-mf-phone-msg aria-live="polite">{{ help or "" }}</div>
+  </div>
+{% endmacro %}

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
+{% from "_phone_field.html" import phone_field %}
 {% block title %}Profil du restaurant — {{ restaurant.name }}{% endblock %}
 {% block content %}
 {% include "_admin_navbar.html" %}
-
 <div class="container py-4" style="max-width: 820px;">
   <form method="post" data-mf-guard autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -22,9 +22,8 @@
                  value="{{ up.last_name if up and up.last_name else '' }}" required>
         </div>
         <div class="col-md-6">
-          <label for="pf-phone" class="form-label small fw-semibold">Téléphone (WhatsApp)</label>
-          <input type="tel" id="pf-phone" name="phone" class="form-control" maxlength="30" inputmode="tel" autocomplete="tel"
-                 pattern="[0-9+\-() ]*" placeholder="+223 70 00 00 00" value="{{ up.phone if up and up.phone else '' }}" required>
+          {{ phone_field("phone", "Téléphone (WhatsApp)", id="pf-phone",
+                         value=(up.phone if up and up.phone else ""), required=True) }}
         </div>
         <div class="col-md-6">
           <label class="form-label small fw-semibold">Email de connexion</label>
@@ -53,9 +52,9 @@
                  placeholder="Ex : Rue 310, face à la pharmacie du Fleuve" value="{{ rp.address if rp and rp.address else '' }}">
         </div>
         <div class="col-md-6">
-          <label for="pf-public-phone" class="form-label small fw-semibold">Numéro affiché aux clients</label>
-          <input type="tel" id="pf-public-phone" name="public_phone" class="form-control" maxlength="30" inputmode="tel"
-                 pattern="[0-9+\-() ]*" placeholder="Réservations, livraisons…" value="{{ rp.public_phone if rp and rp.public_phone else '' }}">
+          {{ phone_field("public_phone", "Numéro affiché aux clients", id="pf-public-phone",
+                         value=(rp.public_phone if rp and rp.public_phone else ""),
+                         help="Réservations, livraisons…") }}
         </div>
         <div class="col-md-3">
           <label for="pf-cuisine" class="form-label small fw-semibold">Type de cuisine</label>
