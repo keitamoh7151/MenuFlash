@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Commandes à emporter - {{ restaurant.name }}{% endblock %}
+{% block content %}{% include "_admin_navbar.html" %}
+<div class="container py-4" style="max-width:760px"><form method="post" class="card mf-section-card"><div class="card-body">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><h1 class="h4 fw-bold">Commandes à emporter</h1>
+<p class="text-secondary">Le client commande à distance, suit la préparation et paie au retrait.</p>
+<div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" name="enabled" id="te-enabled" {{ 'checked' if settings.enabled }}><label class="form-check-label fw-semibold" for="te-enabled">Autoriser les commandes à emporter</label></div>
+<div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" name="paused" id="te-paused" {{ 'checked' if settings.paused }}><label class="form-check-label text-danger fw-semibold" for="te-paused">Suspendre temporairement</label></div>
+<div class="row g-3"><div class="col-md-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="allow_asap" id="te-asap" {{ 'checked' if settings.allow_asap }}><label for="te-asap" class="form-check-label">Dès que possible</label></div></div>
+<div class="col-md-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="allow_scheduled" id="te-scheduled" {{ 'checked' if settings.allow_scheduled }}><label for="te-scheduled" class="form-check-label">Retrait programmé</label></div></div>
+<div class="col-md-4"><label class="form-label">Préparation minimale</label><div class="input-group"><input class="form-control" type="number" min="5" max="180" name="prep_minutes" value="{{ settings.prep_minutes }}"><span class="input-group-text">min</span></div></div>
+<div class="col-md-4"><label class="form-label">Intervalle des créneaux</label><div class="input-group"><input class="form-control" type="number" min="5" max="60" name="slot_minutes" value="{{ settings.slot_minutes }}"><span class="input-group-text">min</span></div></div>
+<div class="col-md-4"><label class="form-label">Maximum par créneau</label><input class="form-control" type="number" min="1" max="50" name="max_per_slot" value="{{ settings.max_per_slot }}"></div></div>
+<button class="btn btn-primary mt-4" type="submit">Enregistrer</button></div></form></div>{% endblock %}

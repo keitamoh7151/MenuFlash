@@ -1,0 +1,6 @@
+.mf-fulfillment { border: 1px solid var(--mf-border, #dee2e6); border-radius: 14px; padding: 14px; background: #fff; }
+.mf-fulfillment-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mf-fulfillment-choice label { border: 1px solid var(--mf-border, #dee2e6); border-radius: 10px; padding: 10px; text-align: center; cursor: pointer; font-weight: 600; }
+.mf-fulfillment-choice label:has(input:checked) { border-color: var(--mf-accent, #0d6efd); background: var(--mf-accent-light, #eef4ff); }
+.mf-fulfillment-choice input { margin-right: 6px; }
+@media (max-width: 420px) { .mf-fulfillment-choice { grid-template-columns: 1fr; } }

@@ -1113,6 +1113,11 @@ def public_theme_stream(slug):
 # --------------------------------------------------------------------------
 # Commande en ligne (côté client) — pas de paiement en ligne.
 # --------------------------------------------------------------------------
+# Fonctions appelées juste après la création d'une commande (avant la notification
+# cuisine). Utilisé par takeaway.py pour marquer les commandes à emporter.
+ORDER_CREATED_HOOKS = []
+
+
 @app.route("/m/<slug>/commande", methods=["POST"])
 def place_order(slug):
     restaurant = tenant_or_404(slug)
@@ -1156,6 +1161,9 @@ def place_order(slug):
             prep_minutes=menu_item.prep_minutes or DEFAULT_PREP_MINUTES,
         ))
     db.session.commit()
+
+    for _hook in ORDER_CREATED_HOOKS:
+        _hook(order)
 
     realtime.publish(restaurant.id, "new_order", _order_feed_dict(order))
 
@@ -2058,6 +2066,10 @@ init_security_plus(app, limiter=limiter, log_audit=log_audit,
 from profiles import init_profiles
 init_profiles(app, owner_required=owner_required, active_restaurant=active_restaurant,
               log_menu_change=log_menu_change)
+
+from takeaway import init_takeaway
+init_takeaway(app, owner_required=owner_required, active_restaurant=active_restaurant,
+              order_hooks=ORDER_CREATED_HOOKS)
 
 
 if __name__ == "__main__":
