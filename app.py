@@ -68,7 +68,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.utils import secure_filename
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from models import (db, Restaurant, User, MenuCategory, MenuItem, QRCode,
                      SubscriptionPayment, Order, OrderItem, DishReview, MenuChangeLog,
@@ -733,7 +733,8 @@ def save_compressed_image(file_storage, restaurant_slug, restaurant_id=None):
         img = Image.open(file_storage.stream)
         img.verify()
         file_storage.stream.seek(0)
-        img = Image.open(file_storage.stream).convert("RGB")
+        img = ImageOps.exif_transpose(Image.open(file_storage.stream)).convert("RGB")
+        img.info = {}   # retire les informations cachées (position GPS, téléphone, date)
     except (UnidentifiedImageError, OSError, ValueError):
         return None
 
@@ -759,9 +760,10 @@ def save_logo_image(file_storage, restaurant_slug, restaurant_id=None):
         img = Image.open(file_storage.stream)
         img.verify()
         file_storage.stream.seek(0)
-        img = Image.open(file_storage.stream)
+        img = ImageOps.exif_transpose(Image.open(file_storage.stream))
         has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
         img = img.convert("RGBA") if has_alpha else img.convert("RGB")
+        img.info = {}   # retire les informations cachées (position GPS, téléphone, date)
     except (UnidentifiedImageError, OSError, ValueError):
         return None
 
@@ -2048,6 +2050,10 @@ init_super_admin(
 
 from two_factor import init_two_factor
 init_two_factor(app, log_audit=log_audit, limiter=limiter)
+
+from security_plus import init_security_plus
+init_security_plus(app, limiter=limiter, log_audit=log_audit,
+                   owner_required=owner_required, active_restaurant=active_restaurant)
 
 
 if __name__ == "__main__":

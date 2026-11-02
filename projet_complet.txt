@@ -78,7 +78,7 @@ from models import (db, Restaurant, User, MenuCategory, MenuItem, QRCode,
                      THEME_PRESETS, DEFAULT_THEME, DEFAULT_PREP_MINUTES,
                      TRIAL_DAYS, MAX_FAILED_LOGIN_ATTEMPTS, LOCKOUT_DURATION_MINUTES)
 from pdf_utils import make_table_tent_pdf
-from stats_utils import build_dashboard_stats
+from stats_utils import build_dashboard_stats, top_selling_items
 from i18n import TRANSLATIONS
 import realtime
 from mailer import init_mailer, send_transactional_email
@@ -975,8 +975,38 @@ def public_menu(slug):
         table_label=table_label,
         ratings=ratings,
         item_suggestions=item_suggestions,
+        popular_ids=_popular_item_ids(restaurant.id, categories),
         translations=TRANSLATIONS,
     )
+
+
+POPULAR_MIN_ITEMS = 3      # en dessous, la section « Les plus commandés » n'est pas affichée
+POPULAR_MAX_ITEMS = 6
+
+
+def _popular_item_ids(restaurant_id, categories):
+    """
+    Plats les plus commandés sur 30 jours, parmi ceux actuellement visibles
+    et disponibles sur le menu public (catégorie non en pause). Renvoie une
+    liste vide s'il n'y a pas assez d'historique : on n'affiche jamais une
+    section « populaire » artificielle.
+    """
+    try:
+        visible = {}
+        for category in categories:
+            for item in category.items:
+                if item.is_available:
+                    visible.setdefault(item.name, item.id)
+        ids = []
+        for row in top_selling_items(restaurant_id, days=30, limit=POPULAR_MAX_ITEMS * 2):
+            item_id = visible.get(row["name"])
+            if item_id and item_id not in ids:
+                ids.append(item_id)
+        ids = ids[:POPULAR_MAX_ITEMS]
+        return ids if len(ids) >= POPULAR_MIN_ITEMS else []
+    except Exception:
+        db.session.rollback()
+        return []
 
 
 def _build_qr_target_url(restaurant, qr=None, table_label=None):
@@ -1592,6 +1622,8 @@ def toggle_item(item_id):
     log_menu_change(restaurant_id, current_user, "item_toggled",
                      f"Plat « {item.name} » marqué {state}.")
     db.session.commit()
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify({"ok": True, "is_available": item.is_available})
     return redirect(url_for("admin_dashboard"))
 
 
@@ -1999,6 +2031,9 @@ init_service(app, owner_required=owner_required,
              active_restaurant=active_restaurant,
              limiter=limiter, log_menu_change=log_menu_change)
 
+from orders_board import init_orders_board
+init_orders_board(app, active_restaurant=active_restaurant, log_audit=log_audit)
+
 from backups import init_backups
 init_backups(app, log_audit=log_audit, super_admin_required=super_admin_required)
 
@@ -2023,8 +2058,6 @@ if __name__ == "__main__":
         _ensure_schema_migrations()
         _ensure_security_defaults()
     app.run(debug=True, port=5000, host="0.0.0.0", threaded=True)
-
-
 
 
 ==================== backups.py ====================
@@ -3603,6 +3636,205 @@ class AuditLog(db.Model):
     ip_address = db.Column(db.String(64), nullable=True)
     details = db.Column(db.String(300), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+==================== orders_board.py ====================
+"""
+MenuFlash Mini — Écran des commandes (cuisine) et historique.
+
+Branchement dans app.py, JUSTE AVANT `from backups import init_backups` :
+
+    from orders_board import init_orders_board
+    init_orders_board(app, active_restaurant=active_restaurant, log_audit=log_audit)
+
+Ce que fait le module
+---------------------
+- /admin/commandes/tableau.json : commandes en cours (nouvelle, en préparation,
+  prête) avec le temps d'attente, le temps de préparation prévu et l'heure de
+  passage à « Prête ». Alimente l'écran cuisine (static/orders_board.js).
+- /admin/commandes/historique.json : historique paginé (30 par page), les plus
+  récentes en premier, filtres Aujourd'hui / Servies / Annulées / Tout.
+  Accessible au gestionnaire ET aux cuisiniers.
+- /admin/commandes/<id>/remettre-prete : remet en « Prête » une commande
+  marquée « Servie » par erreur, pendant 30 minutes seulement.
+
+Sécurité
+--------
+- Toutes les routes exigent d'être connecté (gestionnaire ou cuisinier) et ne
+  renvoient QUE les commandes du restaurant actif (isolation stricte).
+- Le super-admin n'a pas accès à ces routes (il ne gère pas de restaurant).
+- « Remettre en Prête » : POST + jeton CSRF, limité aux commandes servies il y a
+  moins de 30 minutes, tracé dans le journal de sécurité.
+- Les textes (plats, notes, tables) sont affichés par textContent côté
+  navigateur : aucune injection HTML possible.
+"""
+import os
+from datetime import datetime, timedelta
+
+from flask import jsonify, request, abort
+from flask_login import login_required, current_user
+
+from models import db, Order, DEFAULT_PREP_MINUTES
+
+ACTIVE_STATUSES = ("nouvelle", "en_preparation", "prete")
+UNDO_SERVED_MINUTES = 30
+HISTORY_PAGE_SIZE = 30
+HISTORY_FILTERS = ("today", "servie", "annulee", "all")
+
+
+def _utc_offset():
+    try:
+        minutes = int(os.environ.get("MENUFLASH_UTC_OFFSET_MINUTES", "0"))
+    except ValueError:
+        minutes = 0
+    return timedelta(minutes=max(-720, min(minutes, 840)))
+
+
+def _local(dt):
+    return (dt + _utc_offset()) if dt else None
+
+
+def _minutes_since(dt, now):
+    if not dt:
+        return 0
+    return max(int((now - dt).total_seconds() // 60), 0)
+
+
+def _items(order):
+    return [{"name": it.item_name, "quantity": it.quantity} for it in order.items]
+
+
+def _prep_minutes(order):
+    try:
+        return int(order.estimated_prep_minutes or DEFAULT_PREP_MINUTES)
+    except Exception:
+        return DEFAULT_PREP_MINUTES
+
+
+def board_dict(order, now):
+    created = order.created_at or now
+    changed = order.updated_at or created
+    return {
+        "id": order.id,
+        "status": order.status,
+        "table": order.table_label or "Sans table",
+        "notes": order.notes or "",
+        "total": order.total,
+        "items": _items(order),
+        "elapsed": _minutes_since(created, now),
+        "prep": _prep_minutes(order),
+        "status_minutes": _minutes_since(changed, now),
+        "time": _local(created).strftime("%H:%M"),
+    }
+
+
+def history_dict(order, now):
+    created = order.created_at or now
+    changed = order.updated_at or created
+    can_undo = (order.status == "servie"
+                and changed >= now - timedelta(minutes=UNDO_SERVED_MINUTES))
+    return {
+        "id": order.id,
+        "status": order.status,
+        "cancelled_by": order.cancelled_by,
+        "table": order.table_label or "Sans table",
+        "notes": order.notes or "",
+        "total": order.total,
+        "items": _items(order),
+        "created": _local(created).strftime("%d/%m %H:%M"),
+        "created_time": _local(created).strftime("%H:%M"),
+        "finished_time": _local(changed).strftime("%H:%M"),
+        "today": _local(created).date() == _local(now).date(),
+        "can_undo": can_undo,
+    }
+
+
+def init_orders_board(app, *, active_restaurant, log_audit=None):
+
+    def _restaurant():
+        if not current_user.is_authenticated or getattr(current_user, "is_super_admin", False):
+            abort(403)
+        r = active_restaurant()
+        if r is None:
+            abort(403)
+        return r
+
+    def _json(payload):
+        resp = jsonify(payload)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @app.route("/admin/commandes/tableau.json")
+    @login_required
+    def orders_board_feed():
+        r = _restaurant()
+        now = datetime.utcnow()
+        orders = (Order.query
+                  .filter(Order.restaurant_id == r.id, Order.status.in_(ACTIVE_STATUSES))
+                  .order_by(Order.created_at.asc())
+                  .limit(300).all())
+        data = [board_dict(o, now) for o in orders]
+        waiting = [o["elapsed"] for o in data if o["status"] != "prete"]
+        oldest = max((o for o in data if o["status"] != "prete"),
+                     key=lambda o: o["elapsed"], default=None)
+        return _json({
+            "orders": data,
+            "summary": {
+                "active": len(data),
+                "avg_wait": round(sum(waiting) / len(waiting)) if waiting else 0,
+                "oldest_table": oldest["table"] if oldest else None,
+                "oldest_minutes": oldest["elapsed"] if oldest else 0,
+            },
+            "server_time": _local(now).strftime("%H:%M"),
+        })
+
+    @app.route("/admin/commandes/historique.json")
+    @login_required
+    def orders_history_feed():
+        r = _restaurant()
+        now = datetime.utcnow()
+        flt = request.args.get("filtre", "today")
+        if flt not in HISTORY_FILTERS:
+            flt = "today"
+        try:
+            page = max(1, min(int(request.args.get("page", 1)), 10000))
+        except ValueError:
+            page = 1
+
+        q = Order.query.filter(Order.restaurant_id == r.id,
+                               Order.status.in_(("servie", "annulee")))
+        if flt == "today":
+            local_now = _local(now)
+            start_local = datetime(local_now.year, local_now.month, local_now.day)
+            q = q.filter(Order.created_at >= start_local - _utc_offset())
+        elif flt in ("servie", "annulee"):
+            q = q.filter(Order.status == flt)
+
+        total = q.count()
+        pages = max(1, (total + HISTORY_PAGE_SIZE - 1) // HISTORY_PAGE_SIZE)
+        page = min(page, pages)
+        rows = (q.order_by(Order.updated_at.desc(), Order.id.desc())
+                .offset((page - 1) * HISTORY_PAGE_SIZE).limit(HISTORY_PAGE_SIZE).all())
+        return _json({
+            "orders": [history_dict(o, now) for o in rows],
+            "page": page, "pages": pages, "total": total, "filter": flt,
+        })
+
+    @app.route("/admin/commandes/<int:order_id>/remettre-prete", methods=["POST"])
+    @login_required
+    def orders_undo_served(order_id):
+        r = _restaurant()
+        order = Order.query.filter_by(id=order_id, restaurant_id=r.id).first_or_404()
+        now = datetime.utcnow()
+        changed = order.updated_at or order.created_at or now
+        if order.status != "servie" or changed < now - timedelta(minutes=UNDO_SERVED_MINUTES):
+            return _json({"ok": False, "error": "Cette commande ne peut plus être remise en « Prête »."}), 409
+        order.status = "prete"
+        db.session.commit()
+        if log_audit:
+            log_audit("order_undo_served", restaurant_id=r.id, user_email=current_user.email,
+                      details=f"commande #{order.id} ({order.table_label or 'sans table'}) remise en « Prête »")
+        return _json({"ok": True, "status": order.status})
 
 
 ==================== pdf_utils.py ====================
@@ -6192,30 +6424,61 @@ def init_service(app, *, owner_required, active_restaurant, limiter=None, log_me
       bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }
 
+    // Ouvre la modale APRÈS la fermeture du menu d'actions (évite que les
+    // deux composants Bootstrap se disputent le focus).
+    function openFromMenu(trigger, id, name) {
+      var dd = trigger.closest(".dropdown");
+      var toggle = dd && dd.querySelector('[data-bs-toggle="dropdown"]');
+      var inst = toggle && bootstrap.Dropdown.getInstance(toggle);
+      if (inst && toggle.classList.contains("show")) {
+        var done = false;
+        var go = function () { if (!done) { done = true; open(id, name); } };
+        toggle.addEventListener("hidden.bs.dropdown", go, { once: true });
+        inst.hide();
+        setTimeout(go, 300);
+      } else {
+        open(id, name);
+      }
+    }
+
+    function summary(row, comp) {
+      var info = row && row.querySelector(".mf-item-meta");
+      if (!info || info.querySelector(".mf-comp-summary-pill")) return;
+      var parts = [];
+      if (comp.ingredients.length) parts.push(comp.ingredients.length + " ingrédient" + (comp.ingredients.length > 1 ? "s" : ""));
+      if (comp.allergens.length) parts.push(comp.allergens.length + " allergène" + (comp.allergens.length > 1 ? "s" : ""));
+      var pill = el("span", "mf-meta-pill mf-comp-summary-pill");
+      pill.appendChild(el("i", "bi bi-list-check"));
+      pill.appendChild(document.createTextNode(parts.join(" · ") || "Mentions renseignées"));
+      info.insertBefore(pill, info.firstChild);
+    }
+
+    var menuItems = document.querySelectorAll(".mf-comp-open[data-item-id]");
+    if (menuItems.length) {
+      // Mise en page actuelle : entrée « Composition & allergènes » du menu d'actions.
+      menuItems.forEach(function (item) {
+        var id = item.dataset.itemId, name = item.dataset.itemName || "";
+        var comp = items[id];
+        item.addEventListener("click", function (e) { e.preventDefault(); openFromMenu(item, id, name); });
+        if (comp) {
+          item.classList.add("has-data");
+          summary(item.closest("tr"), comp);
+        }
+      });
+      return;
+    }
+
+    // Ancienne mise en page : bouton ajouté à côté du crayon de chaque plat.
     document.querySelectorAll(".mf-edit-item-btn[data-item-id]").forEach(function (editBtn) {
       if (editBtn.parentElement.querySelector(".mf-comp-btn")) return;
       var id = editBtn.dataset.itemId, name = editBtn.dataset.itemName || "";
-      var comp = items[id];
-      var btn = el("button", "btn btn-sm btn-outline-secondary border-0 mf-comp-btn" + (comp ? " has-data" : ""));
+      var btn = el("button", "btn btn-sm btn-outline-secondary border-0 mf-comp-btn" + (items[id] ? " has-data" : ""));
       btn.type = "button";
       btn.title = "Composition et allergènes";
       btn.setAttribute("aria-label", "Composition et allergènes de " + name);
       btn.appendChild(el("i", "bi bi-list-check"));
       btn.addEventListener("click", function () { open(id, name); });
       editBtn.insertAdjacentElement("afterend", btn);
-
-      if (comp) {
-        var cell = editBtn.closest("tr") && editBtn.closest("tr").querySelector(".fw-semibold");
-        if (cell && !cell.parentElement.querySelector(".mf-comp-summary")) {
-          var parts = [];
-          if (comp.ingredients.length) parts.push(comp.ingredients.length + " ingrédient" + (comp.ingredients.length > 1 ? "s" : ""));
-          if (comp.allergens.length) parts.push(comp.allergens.length + " allergène" + (comp.allergens.length > 1 ? "s" : ""));
-          var s = el("div", "mf-comp-summary");
-          s.appendChild(el("i", "bi bi-list-check me-1"));
-          s.appendChild(document.createTextNode(parts.join(" · ") || "mentions renseignées"));
-          cell.parentElement.appendChild(s);
-        }
-      }
     });
   }
 
@@ -6847,6 +7110,1290 @@ def init_service(app, *, owner_required, active_restaurant, limiter=None, log_me
   .mf-landing-lead { max-width: 100%; }
   .mf-phone-mock-wrap { margin-top: 32px; }
 }
+
+
+==================== static\menu_admin.css ====================
+/* ==========================================================================
+   MenuFlash Mini — gestion du menu (tableau de bord du restaurateur)
+   ========================================================================== */
+
+/* ---------- Rappel « plats à compléter » ---------- */
+.mf-menu-tip {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; margin-bottom: 1rem; border-radius: 14px;
+  background: var(--mf-accent-light); color: var(--mf-accent-dark);
+}
+.mf-menu-tip.d-none { display: none !important; }
+.mf-menu-tip > i { font-size: 1.3rem; flex-shrink: 0; }
+.mf-menu-tip .small { color: var(--mf-ink-soft); }
+
+/* ---------- Barre de recherche et filtres ---------- */
+.mf-menu-toolbar { position: sticky; top: 64px; z-index: 20; }
+.mf-menu-search { position: relative; min-width: 200px; }
+.mf-menu-search > i {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--mf-ink-soft); pointer-events: none;
+}
+.mf-menu-search .form-control { padding-left: 2.2rem; border-radius: 999px; }
+
+.mf-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.mf-chip {
+  border: 1px solid var(--mf-border); background: #fff; color: var(--mf-ink);
+  border-radius: 999px; padding: 5px 12px; font-size: .82rem; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px; line-height: 1.2;
+}
+.mf-chip span {
+  background: var(--mf-bg); color: var(--mf-ink-soft);
+  border-radius: 999px; padding: 1px 7px; font-size: .74rem;
+}
+.mf-chip:hover { border-color: var(--mf-accent); }
+.mf-chip.is-active { background: var(--mf-ink); border-color: var(--mf-ink); color: #fff; }
+.mf-chip.is-active span { background: rgba(255,255,255,.18); color: #fff; }
+.mf-chip:focus-visible { outline: 2px solid var(--mf-accent); outline-offset: 2px; }
+
+/* ---------- En-tête de catégorie ---------- */
+.mf-cat-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mf-cat-toggle {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0;
+  border: 0; background: transparent; padding: 4px 6px; border-radius: 8px; color: var(--mf-ink);
+}
+.mf-cat-toggle:hover { background: var(--mf-bg); }
+.mf-cat-toggle:focus-visible { outline: 2px solid var(--mf-accent); }
+.mf-cat-toggle h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mf-cat-chevron { transition: transform .2s ease; color: var(--mf-ink-soft); font-size: .9rem; }
+.mf-cat-count {
+  background: var(--mf-bg); color: var(--mf-ink-soft); font-weight: 700;
+  font-size: .75rem; padding: 1px 8px; border-radius: 999px;
+}
+.mf-category-block.is-collapsed .mf-cat-chevron { transform: rotate(-90deg); }
+.mf-category-block .mf-cat-body { margin-top: .75rem; }
+.mf-category-block.is-collapsed .mf-cat-body { display: none; }
+/* Une recherche ou un filtre déplie temporairement toutes les catégories. */
+#categories-list.mf-filtering .mf-category-block.is-collapsed .mf-cat-body { display: block; }
+#categories-list.mf-filtering .mf-category-block.is-collapsed .mf-cat-chevron { transform: none; }
+#categories-list.mf-filtering .mf-drag-handle { visibility: hidden; }
+
+.mf-icon-btn {
+  color: var(--mf-ink-soft); border: 0; background: transparent;
+  width: 32px; height: 32px; padding: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.mf-icon-btn:hover, .mf-icon-btn[aria-expanded="true"] { background: var(--mf-accent-light); color: var(--mf-accent-dark); }
+
+.mf-paused-badge {
+  font-size: .75rem; font-weight: 700; color: var(--mf-danger);
+  background: var(--mf-danger-bg); padding: 3px 10px; border-radius: 999px;
+}
+.mf-category-paused { opacity: 1; border: 2px dashed var(--mf-danger) !important; }
+.mf-category-paused .mf-cat-body { opacity: .6; }
+
+/* ---------- Tableau des plats : colonnes alignées entre catégories ---------- */
+@media (min-width: 768px) {
+  .mf-menu-table { table-layout: fixed; width: 100%; }
+}
+.mf-menu-table thead th { font-size: .72rem; letter-spacing: .03em; border-bottom-width: 1px; }
+.mf-menu-table td { padding-top: .6rem; padding-bottom: .6rem; }
+.mf-item-info { min-width: 0; }
+.min-w-0 { min-width: 0; }
+.mf-item-name, .mf-item-desc-admin { overflow: hidden; text-overflow: ellipsis; }
+.mf-item-desc-admin {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal;
+}
+.mf-thumb, .mf-thumb-empty { width: 44px; height: 44px; flex-shrink: 0; }
+.mf-item-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.mf-item-meta:empty { display: none; }
+.mf-meta-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .72rem; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+  background: var(--mf-accent-light); color: var(--mf-accent-dark);
+}
+.mf-meta-warn { background: #FFF4DB; color: #8A6100; }
+.mf-meta-pill.d-none { display: none !important; }
+
+/* Plat épuisé : visible mais atténué. */
+tr.mf-item-row.is-soldout td:not(:nth-child(5)):not(:nth-child(6)) { opacity: .5; }
+.mf-avail-form .form-check { padding-left: 3em; min-height: 1.3em; display: flex; align-items: center; }
+.mf-avail-switch { cursor: pointer; width: 2.4em !important; height: 1.3em; margin-left: -3em !important; margin-top: 0 !important; }
+.mf-avail-switch:checked { background-color: var(--mf-success); border-color: var(--mf-success); }
+.mf-avail-label { font-weight: 600; color: var(--mf-success); cursor: pointer; user-select: none; }
+tr.is-soldout .mf-avail-label { color: var(--mf-danger); }
+
+.mf-actions-menu { min-width: 230px; font-size: .9rem; }
+.mf-actions-menu .dropdown-item { padding-top: .45rem; padding-bottom: .45rem; }
+.mf-actions-menu form { margin: 0; }
+.mf-comp-open.has-data::after {
+  content: "renseignée"; margin-left: .4rem; font-size: .7rem; font-weight: 700;
+  color: var(--mf-success); background: var(--mf-success-bg); padding: 1px 6px; border-radius: 999px;
+}
+
+/* « Afficher plus » */
+tr.mf-row-more { display: none; }
+.mf-show-more { margin-top: .5rem; }
+.mf-show-more .btn { font-weight: 600; color: var(--mf-accent-dark); background: var(--mf-bg); border: 0; }
+
+/* Catégorie vide */
+.mf-cat-empty {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
+  padding: 18px; border: 1px dashed var(--mf-border); border-radius: 12px;
+  color: var(--mf-ink-soft); font-size: .9rem;
+}
+.mf-cat-empty > i { font-size: 1.3rem; color: var(--mf-accent); }
+
+/* ---------- Téléphone ---------- */
+@media (max-width: 767.98px) {
+  .mf-menu-toolbar { position: static; }
+  .mf-menu-search { flex: 1 1 100%; }
+  .mf-chips { flex: 1 1 auto; }
+  .mf-cat-head .mf-paused-badge { order: 5; flex-basis: 100%; text-align: center; }
+  /* Sur téléphone, responsive.css transforme chaque plat en carte : la ligne
+     « épuisé » reste lisible et l'interrupteur reste bien cliquable. */
+  .mf-items-tbody > tr.mf-row-more { display: none; }
+  .mf-items-tbody > tr.d-none { display: none !important; }
+}
+
+
+==================== static\menu_admin.js ====================
+/* ==========================================================================
+   MenuFlash Mini — gestion du menu (tableau de bord du restaurateur)
+
+   - Recherche instantanée (nom + description, sans tenir compte des accents)
+   - Filtres : Tous / Épuisés / À compléter (photo, description, composition)
+   - Catégories repliables (état mémorisé par restaurant)
+   - « Afficher les N autres plats » au-delà de 8 plats par catégorie
+   - Interrupteur Disponible / Épuisé sans rechargement de la page
+   - Rappel des plats incomplets
+   - Info-bulles sur les boutons icône, catégorie présélectionnée à l'ajout
+
+   Toutes les données affichées passent par textContent (aucune injection HTML).
+   ========================================================================== */
+(function () {
+  "use strict";
+
+  var VISIBLE_ROWS = 8;        // plats affichés par catégorie avant « Afficher plus »
+  var MORE_THRESHOLD = 10;     // « Afficher plus » seulement au-delà de ce nombre
+
+  function norm(text) {
+    return String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  }
+  function toast(msg, isError) { if (window.MFShowToast) window.MFShowToast(msg, !!isError); }
+  function plural(n, one, many) { return n + " " + (n > 1 ? many : one); }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var list = document.getElementById("categories-list");
+    if (!list) return;
+
+    var blocks = Array.prototype.slice.call(list.querySelectorAll(".mf-category-block"));
+    var rows = Array.prototype.slice.call(list.querySelectorAll("tr.mf-item-row"));
+    var search = document.getElementById("mf-menu-search");
+    var result = document.getElementById("mf-search-result");
+    var noResults = document.getElementById("mf-no-results");
+    var noResultsText = document.getElementById("mf-no-results-text");
+    var state = { query: "", filter: "all", expanded: {} };
+
+    /* ---------------- Info-bulles ---------------- */
+    if (window.bootstrap && bootstrap.Tooltip) {
+      document.querySelectorAll("[data-mf-tip]").forEach(function (el) {
+        el.setAttribute("title", el.dataset.mfTip);
+        new bootstrap.Tooltip(el, { trigger: "hover", container: "body" });
+      });
+    }
+
+    /* ---------------- Plats incomplets ---------------- */
+    var compItems = {};
+    try {
+      var compEl = document.getElementById("mf-composition-data");
+      if (compEl) compItems = JSON.parse(compEl.textContent).items || {};
+    } catch (e) { compItems = {}; }
+
+    var missingCount = { photo: 0, desc: 0, comp: 0 };
+    var incompleteTotal = 0;
+    rows.forEach(function (row) {
+      var missing = [];
+      if (row.dataset.hasPhoto !== "1") { missing.push("photo"); missingCount.photo++; }
+      if (row.dataset.hasDesc !== "1") { missing.push("description"); missingCount.desc++; }
+      if (!compItems[row.dataset.id]) { missing.push("composition"); missingCount.comp++; }
+      row.dataset.incomplete = missing.length ? "1" : "0";
+      // Le texte de recherche sans accents est préparé une seule fois.
+      row.dataset.searchNorm = norm(row.dataset.search);
+      if (missing.length) {
+        incompleteTotal++;
+        var pill = row.querySelector("[data-mf-incomplete]");
+        if (pill) {
+          pill.textContent = "";
+          var icon = document.createElement("i");
+          icon.className = "bi bi-exclamation-circle";
+          pill.appendChild(icon);
+          pill.appendChild(document.createTextNode("Sans " + missing.join(", ")));
+          pill.classList.remove("d-none");
+        }
+      }
+    });
+
+    var incCount = document.getElementById("mf-count-incomplete");
+    if (incCount) incCount.textContent = incompleteTotal;
+    var tip = document.getElementById("mf-incomplete-tip");
+    if (tip && incompleteTotal && rows.length) {
+      document.getElementById("mf-incomplete-title").textContent =
+        plural(incompleteTotal, "plat peut", "plats peuvent") + " être amélioré" + (incompleteTotal > 1 ? "s" : "");
+      var parts = [];
+      if (missingCount.photo) parts.push(plural(missingCount.photo, "sans photo", "sans photo"));
+      if (missingCount.desc) parts.push(plural(missingCount.desc, "sans description", "sans description"));
+      if (missingCount.comp) parts.push(plural(missingCount.comp, "sans composition", "sans composition"));
+      document.getElementById("mf-incomplete-detail").textContent =
+        parts.join(" · ") + ". Un menu complet rassure les clients et fait vendre davantage.";
+      tip.classList.remove("d-none");
+    }
+
+    /* ---------------- Repli des catégories ---------------- */
+    var storeKey = "mf_collapsed_" + (list.dataset.restaurant || "0");
+    var collapsed = {};
+    try { collapsed = JSON.parse(localStorage.getItem(storeKey) || "{}") || {}; } catch (e) { collapsed = {}; }
+
+    function saveCollapsed() {
+      try { localStorage.setItem(storeKey, JSON.stringify(collapsed)); } catch (e) {}
+    }
+    function setCollapsed(block, value) {
+      block.classList.toggle("is-collapsed", value);
+      var btn = block.querySelector(".mf-cat-toggle");
+      if (btn) btn.setAttribute("aria-expanded", value ? "false" : "true");
+      if (value) collapsed[block.dataset.id] = 1; else delete collapsed[block.dataset.id];
+    }
+    blocks.forEach(function (block) {
+      if (collapsed[block.dataset.id]) setCollapsed(block, true);
+      var btn = block.querySelector(".mf-cat-toggle");
+      if (btn) btn.addEventListener("click", function () {
+        setCollapsed(block, !block.classList.contains("is-collapsed"));
+        saveCollapsed();
+        updateToggleAll();
+      });
+    });
+
+    var toggleAll = document.getElementById("mf-toggle-all");
+    function updateToggleAll() {
+      if (!toggleAll) return;
+      var allCollapsed = blocks.length && blocks.every(function (b) { return b.classList.contains("is-collapsed"); });
+      toggleAll.querySelector("span").textContent = allCollapsed ? "Tout déplier" : "Tout replier";
+      toggleAll.querySelector("i").className = "bi " + (allCollapsed ? "bi-arrows-expand" : "bi-arrows-collapse") + " me-1";
+    }
+    if (toggleAll) {
+      toggleAll.addEventListener("click", function () {
+        var collapse = !blocks.every(function (b) { return b.classList.contains("is-collapsed"); });
+        blocks.forEach(function (b) { setCollapsed(b, collapse); });
+        saveCollapsed();
+        updateToggleAll();
+      });
+      updateToggleAll();
+    }
+
+    /* ---------------- Filtrage, recherche et « Afficher plus » ---------------- */
+    function matches(row) {
+      if (state.query && row.dataset.searchNorm.indexOf(state.query) === -1) return false;
+      if (state.filter === "soldout" && !row.classList.contains("is-soldout")) return false;
+      if (state.filter === "incomplete" && row.dataset.incomplete !== "1") return false;
+      return true;
+    }
+
+    function apply() {
+      var filtering = !!state.query || state.filter !== "all";
+      list.classList.toggle("mf-filtering", filtering);
+      var shown = 0;
+
+      blocks.forEach(function (block) {
+        var blockRows = Array.prototype.slice.call(block.querySelectorAll("tr.mf-item-row"));
+        var visible = 0;
+        blockRows.forEach(function (row) {
+          var ok = matches(row);
+          row.classList.toggle("d-none", !ok);
+          row.classList.remove("mf-row-more");
+          if (ok) visible++;
+        });
+        shown += visible;
+
+        // Pendant une recherche, on cache les catégories sans résultat.
+        block.classList.toggle("d-none", filtering && visible === 0);
+
+        // « Afficher plus » : seulement hors recherche/filtre.
+        var more = block.querySelector(".mf-show-more");
+        if (!more) return;
+        var hiddenRows = [];
+        if (!filtering && blockRows.length > MORE_THRESHOLD && !state.expanded[block.dataset.id]) {
+          hiddenRows = blockRows.slice(VISIBLE_ROWS);
+          hiddenRows.forEach(function (row) { row.classList.add("mf-row-more"); });
+        }
+        more.classList.toggle("d-none", hiddenRows.length === 0);
+        if (hiddenRows.length) {
+          more.querySelector("button").textContent = "Afficher les " + hiddenRows.length + " autres plats";
+        }
+      });
+
+      if (result) {
+        result.classList.toggle("d-none", !filtering || shown === 0);
+        result.textContent = filtering ? plural(shown, "plat trouvé", "plats trouvés") : "";
+      }
+      if (noResults) {
+        noResults.classList.toggle("d-none", !(filtering && shown === 0));
+        noResultsText.textContent = state.query
+          ? "Aucun plat ne correspond à « " + search.value.trim() + " »."
+          : "Aucun plat dans ce filtre.";
+      }
+    }
+
+    blocks.forEach(function (block) {
+      var more = block.querySelector(".mf-show-more button");
+      if (more) more.addEventListener("click", function () {
+        state.expanded[block.dataset.id] = true;
+        apply();
+      });
+    });
+
+    if (search) {
+      var timer = null;
+      search.addEventListener("input", function () {
+        clearTimeout(timer);
+        timer = setTimeout(function () { state.query = norm(search.value); apply(); }, 120);
+      });
+      search.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { search.value = ""; state.query = ""; apply(); }
+      });
+      // Raccourci « / » pour aller dans la recherche.
+      document.addEventListener("keydown", function (e) {
+        var tag = (e.target && e.target.tagName) || "";
+        if (e.key === "/" && !/INPUT|TEXTAREA|SELECT/.test(tag) && !document.querySelector(".modal.show")) {
+          e.preventDefault();
+          search.focus();
+        }
+      });
+    }
+
+    function setFilter(value) {
+      state.filter = value;
+      document.querySelectorAll("[data-mf-filter]").forEach(function (chip) {
+        chip.classList.toggle("is-active", chip.dataset.mfFilter === value);
+        chip.setAttribute("aria-pressed", chip.dataset.mfFilter === value ? "true" : "false");
+      });
+      apply();
+    }
+    document.querySelectorAll("[data-mf-filter]").forEach(function (chip) {
+      chip.addEventListener("click", function () { setFilter(chip.dataset.mfFilter); });
+    });
+    document.querySelectorAll("[data-mf-filter-shortcut]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        setFilter(btn.dataset.mfFilterShortcut);
+        var toolbar = document.querySelector(".mf-menu-toolbar");
+        if (toolbar) toolbar.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+    var clear = document.getElementById("mf-clear-filters");
+    if (clear) clear.addEventListener("click", function () {
+      if (search) search.value = "";
+      state.query = "";
+      setFilter("all");
+    });
+
+    /* ---------------- Disponible / Épuisé sans rechargement ---------------- */
+    var soldoutCount = document.getElementById("mf-count-soldout");
+    function refreshSoldoutCount() {
+      if (soldoutCount) soldoutCount.textContent = list.querySelectorAll("tr.mf-item-row.is-soldout").length;
+    }
+    function renderAvailability(row, available) {
+      var input = row.querySelector(".mf-avail-switch");
+      var label = row.querySelector(".mf-avail-label");
+      if (input) input.checked = available;
+      if (label) label.textContent = available ? "Disponible" : "Épuisé";
+      row.classList.toggle("is-soldout", !available);
+      refreshSoldoutCount();
+    }
+
+    list.querySelectorAll(".mf-avail-form").forEach(function (form) {
+      var input = form.querySelector(".mf-avail-switch");
+      var row = form.closest("tr");
+      if (!input || !row) return;
+      form.addEventListener("submit", function (e) { e.preventDefault(); });
+      input.addEventListener("change", function () {
+        var wanted = input.checked;
+        input.disabled = true;
+        renderAvailability(row, wanted);
+        fetch(form.action, {
+          method: "POST",
+          headers: { "X-Requested-With": "fetch" },
+          body: new FormData(form)
+        })
+          .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(function (data) {
+            renderAvailability(row, !!data.is_available);
+            var name = (row.querySelector(".mf-item-name") || {}).textContent || "Plat";
+            toast(name + (data.is_available ? " est de nouveau disponible." : " est marqué épuisé : il est masqué aux clients."), false);
+            if (state.filter === "soldout") apply();
+          })
+          .catch(function () {
+            renderAvailability(row, !wanted);
+            toast("Impossible de changer la disponibilité. Vérifiez votre connexion.", true);
+          })
+          .finally(function () { input.disabled = false; });
+      });
+    });
+
+    /* ---------------- Ajout d'un plat : catégorie présélectionnée ---------------- */
+    var addModal = document.getElementById("mf-add-item-modal");
+    if (addModal) {
+      addModal.addEventListener("show.bs.modal", function (e) {
+        var trigger = e.relatedTarget;
+        var select = document.getElementById("add-item-category");
+        if (trigger && trigger.dataset.categoryId && select) select.value = trigger.dataset.categoryId;
+      });
+      addModal.addEventListener("shown.bs.modal", function () {
+        var name = document.getElementById("add-item-name");
+        if (name) name.focus();
+      });
+    }
+    var addCat = document.getElementById("mf-add-category-modal");
+    if (addCat) addCat.addEventListener("shown.bs.modal", function () {
+      var input = document.getElementById("add-category-name");
+      if (input) input.focus();
+    });
+
+    apply();
+  });
+})();
+
+
+==================== static\menu_public.css ====================
+/* ==========================================================================
+   MenuFlash Mini — menu client : recherche, « Les plus commandés », « Voir plus »
+   ========================================================================== */
+
+/* ---------- Recherche ---------- */
+.mf-pub-search { position: relative; margin: 18px 0 4px; }
+.mf-pub-search > i {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  color: var(--mf-ink-soft); pointer-events: none;
+}
+.mf-pub-search .form-control {
+  border-radius: 999px; padding: .65rem 2.6rem .65rem 2.4rem;
+  border: 1px solid var(--mf-border); background: #fff; font-size: 1rem; /* 16 px : pas de zoom sur iPhone */
+  box-shadow: 0 2px 10px rgba(26,29,35,.05);
+}
+.mf-pub-search .form-control:focus {
+  border-color: var(--mf-accent);
+  box-shadow: 0 0 0 .2rem color-mix(in srgb, var(--mf-accent) 25%, transparent);
+}
+.mf-pub-search input::-webkit-search-cancel-button { display: none; }
+.mf-pub-search-clear {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 32px; height: 32px; border-radius: 50%; border: 0;
+  background: var(--mf-bg); color: var(--mf-ink-soft);
+}
+.mf-pub-noresult { text-align: center; color: var(--mf-ink-soft); padding: 32px 8px; margin: 0; }
+
+/* ---------- Les plus commandés ---------- */
+.mf-popular { margin-top: 6px; }
+.mf-popular-track {
+  display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 12px;
+  scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.mf-popular-track::-webkit-scrollbar { display: none; }
+.mf-pop-tile {
+  flex: 0 0 150px; scroll-snap-align: start; cursor: pointer;
+  background: #fff; border-radius: 16px; overflow: hidden;
+  box-shadow: 0 2px 12px rgba(26,29,35,.08);
+  display: flex; flex-direction: column;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.mf-pop-tile:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(26,29,35,.12); }
+.mf-pop-tile:focus-visible { outline: 2px solid var(--mf-accent); outline-offset: 2px; }
+.mf-pop-media {
+  position: relative; height: 100px; background: var(--mf-accent-light);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--mf-accent-dark); font-size: 1.8rem;
+}
+.mf-pop-media img { width: 100%; height: 100%; object-fit: cover; }
+.mf-pop-qty {
+  position: absolute; top: 8px; right: 8px; min-width: 24px; height: 24px; padding: 0 6px;
+  border-radius: 999px; background: var(--mf-accent); color: #fff;
+  font-size: .78rem; font-weight: 700; display: flex; align-items: center; justify-content: center;
+}
+.mf-pop-qty.d-none { display: none !important; }
+.mf-pop-name {
+  font-weight: 700; font-size: .88rem; line-height: 1.25; padding: 8px 10px 0;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.mf-pop-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 10px 10px; margin-top: auto; }
+.mf-pop-price { color: var(--mf-accent-dark); font-weight: 700; font-size: .82rem; white-space: nowrap; }
+.mf-pop-add {
+  width: 32px; height: 32px; border-radius: 50%; border: 0; flex-shrink: 0;
+  background: var(--mf-accent); color: #fff; display: flex; align-items: center; justify-content: center;
+}
+.mf-pop-add:hover { background: var(--mf-accent-dark); }
+.mf-pop-add:focus-visible { outline: 2px solid var(--mf-accent-dark); outline-offset: 2px; }
+body.mf-is-closed .mf-pop-add, body.mf-is-closed .mf-pop-qty { display: none !important; }
+
+/* Badge « Populaire » sur le plat dans le menu */
+.mf-pop-badge {
+  display: inline-block; vertical-align: middle; margin-left: 6px;
+  font-size: .66rem; font-weight: 800; letter-spacing: .02em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px; background: #FFE9D6; color: #B4470F;
+}
+
+/* Mise en évidence quand on clique sur un plat populaire */
+@keyframes mf-highlight {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--mf-accent) 60%, transparent); }
+  100% { box-shadow: 0 0 0 14px transparent; }
+}
+.mf-item-card.mf-highlight { animation: mf-highlight 1s ease-out 2; }
+
+/* ---------- Voir plus ---------- */
+.mf-item-card.mf-pub-hidden { display: none !important; }
+.mf-pub-more {
+  width: 100%; margin: 0 0 8px; border-radius: 12px; font-weight: 700;
+  background: #fff; color: var(--mf-accent-dark); border: 1px dashed var(--mf-border);
+}
+.mf-pub-more:hover { border-color: var(--mf-accent); background: var(--mf-accent-light); color: var(--mf-accent-dark); }
+.mf-pub-more.d-none { display: none !important; }
+
+@media (max-width: 380px) {
+  .mf-pop-tile { flex-basis: 136px; }
+  .mf-pop-media { height: 88px; }
+}
+
+
+==================== static\menu_public.js ====================
+/* ==========================================================================
+   MenuFlash Mini — menu client : recherche, « Les plus commandés »,
+   « Voir les autres plats » et badge « Populaire ».
+
+   - Le bouton + d'un plat populaire déclenche le vrai bouton + du plat dans
+     le menu : le panier, le récapitulatif et les suggestions fonctionnent
+     exactement comme d'habitude (aucune logique de commande dupliquée).
+   - Textes en français ou en anglais selon la langue choisie par le client.
+   - Tout le contenu est inséré par textContent (aucune injection HTML).
+   ========================================================================== */
+(function () {
+  "use strict";
+
+  var VISIBLE_ITEMS = 6;       // plats affichés par catégorie avant « Voir plus »
+  var MORE_THRESHOLD = 8;      // « Voir plus » seulement au-delà de ce nombre
+
+  var TEXT = {
+    fr: { search: "Rechercher un plat…", popular: "Les plus commandés", badge: "Populaire",
+          more: function (n) { return "Voir les " + n + " autres plats"; },
+          none: function (q) { return "Aucun plat ne correspond à « " + q + " »."; },
+          add: function (name) { return "Ajouter " + name; }, clear: "Effacer la recherche" },
+    en: { search: "Search a dish…", popular: "Most ordered", badge: "Popular",
+          more: function (n) { return "See " + n + " more dishes"; },
+          none: function (q) { return "No dish matches “" + q + "”."; },
+          add: function (name) { return "Add " + name; }, clear: "Clear search" }
+  };
+  function lang() { try { return localStorage.getItem("mf_lang") === "en" ? "en" : "fr"; } catch (e) { return "fr"; } }
+  function t(key) { return TEXT[lang()][key]; }
+  function norm(text) {
+    return String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var form = document.getElementById("order-form");
+    if (!form) return;
+
+    var sections = Array.prototype.slice.call(document.querySelectorAll(".mf-menu-section"));
+    var cards = Array.prototype.slice.call(document.querySelectorAll(".mf-item-card[data-mf-item]"));
+    cards.forEach(function (card) { card.dataset.searchNorm = norm(card.dataset.search); });
+
+    var search = document.getElementById("mf-pub-search");
+    var clearBtn = document.querySelector(".mf-pub-search-clear");
+    var noResult = document.getElementById("mf-pub-noresult");
+    var popular = document.getElementById("mf-popular");
+    var track = document.getElementById("mf-popular-track");
+    var expanded = {};
+    var query = "";
+
+    function cardById(id) { return document.querySelector('.mf-item-card[data-mf-item="' + id + '"]'); }
+
+    /* ---------------- « Les plus commandés » ---------------- */
+    var popularIds = [];
+    try { popularIds = JSON.parse((document.getElementById("mf-popular-data") || {}).textContent || "[]"); }
+    catch (e) { popularIds = []; }
+    var popularTiles = [];
+
+    function buildPopular() {
+      if (!popular || !track || !popularIds.length) return;
+      popularIds.forEach(function (id) {
+        var card = cardById(id);
+        if (!card) return;
+        var group = card.querySelector(".mf-qty-group");
+        var plus = card.querySelector(".mf-qty-plus");
+        var nameText = (card.querySelector("h3") || {}).textContent || "";
+        var priceText = (card.querySelector(".mf-item-price") || {}).textContent || "";
+
+        // Badge « Populaire » sur le plat dans le menu.
+        var title = card.querySelector("h3");
+        if (title && !title.querySelector(".mf-pop-badge")) {
+          title.appendChild(el("span", "mf-pop-badge", t("badge")));
+        }
+
+        var tile = el("div", "mf-pop-tile");
+        tile.setAttribute("role", "button");
+        tile.tabIndex = 0;
+        var img = card.querySelector("img.mf-item-img");
+        var media = el("div", "mf-pop-media");
+        if (img) {
+          var i = document.createElement("img");
+          i.src = img.getAttribute("src");
+          i.alt = "";
+          i.loading = "lazy";
+          media.appendChild(i);
+        } else {
+          media.appendChild(el("i", "bi bi-egg-fried"));
+        }
+        var qty = el("span", "mf-pop-qty d-none");
+        media.appendChild(qty);
+        tile.appendChild(media);
+        tile.appendChild(el("div", "mf-pop-name", nameText.replace(t("badge"), "").trim()));
+        var foot = el("div", "mf-pop-foot");
+        foot.appendChild(el("span", "mf-pop-price", priceText.trim()));
+        var add = el("button", "mf-pop-add");
+        add.type = "button";
+        add.setAttribute("aria-label", t("add")(nameText.trim()));
+        add.appendChild(el("i", "bi bi-plus-lg"));
+        foot.appendChild(add);
+        tile.appendChild(foot);
+        track.appendChild(tile);
+
+        function syncQty() {
+          var v = parseInt(((group && group.querySelector(".mf-qty-value")) || {}).textContent, 10) || 0;
+          qty.textContent = v;
+          qty.classList.toggle("d-none", v === 0);
+        }
+        add.addEventListener("click", function (e) {
+          e.stopPropagation();
+          if (plus) plus.click();
+          syncQty();
+          add.classList.remove("mf-pop");
+          void add.offsetWidth;
+          add.classList.add("mf-pop");
+        });
+        function goToCard() {
+          card.scrollIntoView({ behavior: "smooth", block: "center" });
+          card.classList.remove("mf-highlight");
+          void card.offsetWidth;
+          card.classList.add("mf-highlight");
+        }
+        tile.addEventListener("click", goToCard);
+        tile.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); goToCard(); } });
+        // La tuile suit en permanence la quantité du plat dans le menu (ajout,
+        // retrait, panier vidé après l'envoi de la commande…).
+        var valueEl = group && group.querySelector(".mf-qty-value");
+        if (valueEl && window.MutationObserver) {
+          new MutationObserver(syncQty).observe(valueEl, { childList: true, characterData: true, subtree: true });
+        }
+        popularTiles.push({ syncQty: syncQty, add: add, name: nameText.trim() });
+      });
+      if (popularTiles.length) popular.classList.remove("d-none");
+    }
+
+    /* ---------------- « Voir les autres plats » ---------------- */
+    function setupMore(section) {
+      var list = Array.prototype.slice.call(section.querySelectorAll(".mf-item-card[data-mf-item]"));
+      if (list.length <= MORE_THRESHOLD) return;
+      var btn = el("button", "btn mf-pub-more");
+      btn.type = "button";
+      section.appendChild(btn);
+      section._more = { cards: list.slice(VISIBLE_ITEMS), btn: btn };
+      btn.addEventListener("click", function () {
+        expanded[section.id] = true;
+        apply();
+      });
+    }
+
+    /* ---------------- Recherche et affichage ---------------- */
+    function apply() {
+      var searching = !!query;
+      var shown = 0;
+      sections.forEach(function (section) {
+        var visible = 0;
+        section.querySelectorAll(".mf-item-card[data-mf-item]").forEach(function (card) {
+          var ok = !searching || card.dataset.searchNorm.indexOf(query) !== -1;
+          card.classList.toggle("d-none", !ok);
+          card.classList.remove("mf-pub-hidden");
+          if (ok) visible++;
+        });
+        shown += visible;
+        section.classList.toggle("d-none", searching && visible === 0);
+        var more = section._more;
+        if (more) {
+          var collapse = !searching && !expanded[section.id];
+          more.cards.forEach(function (card) { card.classList.toggle("mf-pub-hidden", collapse); });
+          more.btn.classList.toggle("d-none", !collapse);
+          more.btn.textContent = t("more")(more.cards.length);
+        }
+      });
+      if (popular && popularTiles.length) popular.classList.toggle("d-none", searching);
+      if (noResult) {
+        noResult.classList.toggle("d-none", !(searching && shown === 0));
+        noResult.textContent = searching ? t("none")(search.value.trim()) : "";
+      }
+      if (clearBtn) clearBtn.classList.toggle("d-none", !searching);
+    }
+
+    function translate() {
+      if (search) search.placeholder = t("search");
+      if (clearBtn) clearBtn.setAttribute("aria-label", t("clear"));
+      var title = document.querySelector("#mf-popular-title span");
+      if (title) title.textContent = t("popular");
+      document.querySelectorAll(".mf-pop-badge").forEach(function (b) { b.textContent = t("badge"); });
+      popularTiles.forEach(function (p) { p.add.setAttribute("aria-label", t("add")(p.name)); });
+      apply();
+    }
+
+    if (search) {
+      var timer = null;
+      search.addEventListener("input", function () {
+        clearTimeout(timer);
+        timer = setTimeout(function () { query = norm(search.value); apply(); }, 120);
+      });
+      search.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); search.blur(); }
+        if (e.key === "Escape") { search.value = ""; query = ""; apply(); }
+      });
+    }
+    if (clearBtn) clearBtn.addEventListener("click", function () {
+      search.value = ""; query = ""; apply(); search.focus();
+    });
+
+    // Un clic sur une catégorie annule la recherche pour afficher tout le menu.
+    document.querySelectorAll(".mf-nav-pills .nav-link").forEach(function (link) {
+      link.addEventListener("click", function () {
+        if (query) { search.value = ""; query = ""; apply(); }
+      });
+    });
+
+    buildPopular();
+    sections.forEach(setupMore);
+    document.querySelectorAll(".mf-lang-btn").forEach(function (b) {
+      b.addEventListener("click", function () { setTimeout(translate, 0); });
+    });
+    translate();
+  });
+})();
+
+
+==================== static\orders_board.css ====================
+/* ==========================================================================
+   MenuFlash Mini — écran des commandes (cuisine) et historique
+   ========================================================================== */
+.ob-wrap { max-width: 1320px; padding: 18px 16px 40px; }
+
+/* ---------- Barre d'outils ---------- */
+.ob-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.ob-title { min-width: 0; }
+.ob-summary { font-size: .88rem; color: var(--mf-ink-soft); margin-top: 2px; }
+.ob-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.ob-sound {
+  display: inline-flex; align-items: center; gap: 6px; border-radius: 999px;
+  padding: 5px 12px; font-size: .82rem; font-weight: 700; border: 1px solid transparent;
+}
+.ob-sound.is-off { background: var(--mf-danger-bg); color: var(--mf-danger); border-color: rgba(196,69,58,.35); animation: ob-blink 1.6s ease-in-out infinite; }
+.ob-sound.is-on { background: var(--mf-success-bg); color: var(--mf-success); }
+@keyframes ob-blink { 0%, 100% { box-shadow: 0 0 0 0 rgba(196,69,58,.0); } 50% { box-shadow: 0 0 0 5px rgba(196,69,58,.18); } }
+
+.ob-views { display: inline-flex; background: #fff; border: 1px solid var(--mf-border); border-radius: 999px; padding: 3px; }
+.ob-view { border: 0; background: transparent; border-radius: 999px; padding: 5px 14px; font-size: .84rem; font-weight: 600; color: var(--mf-ink-soft); }
+.ob-view.is-active { background: var(--mf-ink); color: #fff; }
+
+/* ---------- Colonnes ---------- */
+.ob-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.ob-col { background: #fff; border-radius: 16px; box-shadow: 0 2px 10px rgba(26,29,35,.06); overflow: hidden; min-height: 220px; }
+.ob-col-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; font-weight: 800; font-size: .95rem; }
+.ob-col-head b { margin-left: auto; min-width: 28px; text-align: center; border-radius: 999px; padding: 1px 9px; font-size: .82rem; background: rgba(255,255,255,.65); }
+.ob-col--nouvelle .ob-col-head { background: #E3ECFB; color: #1E4480; }
+.ob-col--en_preparation .ob-col-head { background: #FBE9CC; color: #8A5300; }
+.ob-col--prete .ob-col-head { background: var(--mf-success-bg); color: var(--mf-success); }
+.ob-col-body { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.ob-col-empty { color: var(--mf-ink-soft); font-size: .86rem; margin: 6px 4px; }
+
+/* ---------- Carte de commande ---------- */
+.ob-card { border: 1px solid var(--mf-border); border-left: 5px solid #9BB5E8; border-radius: 12px; padding: 12px 14px; background: #fff; }
+.ob-card--warn { border-left-color: #E0A030; }
+.ob-card--late { border-left-color: var(--mf-danger); background: #FFF8F7; }
+.ob-card.is-new { animation: ob-new 1.2s ease-out 2; }
+@keyframes ob-new { 0% { box-shadow: 0 0 0 0 rgba(42,91,168,.45); } 100% { box-shadow: 0 0 0 14px rgba(42,91,168,0); } }
+
+.ob-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ob-table { font-family: "Poppins", "Inter", sans-serif; font-weight: 800; font-size: 1.25rem; line-height: 1.15; overflow-wrap: anywhere; }
+.ob-wait { flex-shrink: 0; font-size: .8rem; font-weight: 700; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+.ob-wait--ok { background: var(--mf-bg); color: var(--mf-ink-soft); }
+.ob-wait--warn { background: #FFF1D6; color: #9A6200; }
+.ob-wait--late { background: var(--mf-danger); color: #fff; }
+.ob-meta { font-size: .76rem; color: var(--mf-ink-soft); margin: 2px 0 8px; }
+
+.ob-items { list-style: none; padding: 0; margin: 0 0 8px; }
+.ob-items li { font-size: 1rem; padding: 3px 0; border-bottom: 1px dashed var(--mf-border); overflow-wrap: anywhere; }
+.ob-items li:last-child { border-bottom: 0; }
+.ob-qty { display: inline-block; min-width: 2.1em; color: var(--mf-accent-dark); }
+
+.ob-note { display: flex; gap: 8px; align-items: flex-start; background: #FFF3C4; color: #6B4E00; border: 1px solid #F1D978; border-radius: 10px; padding: 8px 10px; font-weight: 600; font-size: .9rem; margin-bottom: 8px; overflow-wrap: anywhere; }
+.ob-note i { color: #C08A00; margin-top: 2px; }
+
+.ob-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ob-total { font-weight: 700; color: var(--mf-accent-dark); font-size: .86rem; white-space: nowrap; }
+.ob-buttons { display: flex; gap: 6px; flex: 1 1 auto; justify-content: flex-end; }
+.ob-next { flex: 1 1 auto; max-width: 260px; font-weight: 700; color: #fff; border: 0; min-height: 40px; }
+.ob-next--nouvelle { background: #2A5BA8; }
+.ob-next--en_preparation { background: #D98E1F; }
+.ob-next--prete { background: var(--mf-success); }
+.ob-next:hover { filter: brightness(.94); color: #fff; }
+.ob-cancel { width: 40px; min-height: 40px; border: 1px solid var(--mf-border); background: #fff; color: var(--mf-danger); flex-shrink: 0; }
+.ob-cancel:hover { background: var(--mf-danger-bg); color: var(--mf-danger); }
+.ob-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--mf-danger-bg); color: var(--mf-danger); font-weight: 700; font-size: .88rem; }
+.ob-confirm span { flex: 1 1 100%; }
+
+/* ---------- Écran vide ---------- */
+.ob-empty { text-align: center; color: var(--mf-ink-soft); background: #fff; border-radius: 16px; padding: 56px 20px; box-shadow: 0 2px 10px rgba(26,29,35,.06); }
+.ob-empty i { font-size: 2.6rem; color: var(--mf-accent); }
+.ob-empty h2 { color: var(--mf-ink); }
+
+/* ---------- Onglets (téléphone) ---------- */
+.ob-coltabs { display: none; }
+@media (max-width: 767.98px) {
+  .ob-coltabs { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
+  .ob-coltabs.d-none { display: none !important; }
+  .ob-coltab { flex: 1 0 auto; border: 1px solid var(--mf-border); background: #fff; border-radius: 999px; padding: 7px 12px; font-size: .82rem; font-weight: 700; color: var(--mf-ink-soft); white-space: nowrap; }
+  .ob-coltab span { margin-left: 4px; background: var(--mf-bg); border-radius: 999px; padding: 0 7px; }
+  .ob-coltab.is-active { background: var(--mf-ink); border-color: var(--mf-ink); color: #fff; }
+  .ob-coltab.is-active span { background: rgba(255,255,255,.2); }
+  .ob-board { grid-template-columns: 1fr; }
+  .ob-board .ob-col { display: none; }
+  .ob-board[data-active-col="nouvelle"] .ob-col--nouvelle,
+  .ob-board[data-active-col="en_preparation"] .ob-col--en_preparation,
+  .ob-board[data-active-col="prete"] .ob-col--prete { display: block; }
+  .ob-col-head { display: none; }
+  .ob-actions { width: 100%; }
+  .ob-views { margin-left: auto; }
+}
+
+/* ---------- Historique ---------- */
+.ob-history-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.ob-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ob-chip { border: 1px solid var(--mf-border); background: #fff; border-radius: 999px; padding: 5px 12px; font-size: .82rem; font-weight: 600; color: var(--mf-ink); }
+.ob-chip.is-active { background: var(--mf-ink); border-color: var(--mf-ink); color: #fff; }
+.ob-history { background: #fff; border-radius: 16px; box-shadow: 0 2px 10px rgba(26,29,35,.06); overflow: hidden; }
+.ob-hrow { display: flex; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--mf-border); }
+.ob-hrow:last-child { border-bottom: 0; }
+.ob-hmain { min-width: 0; flex: 1 1 auto; }
+.ob-htop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ob-hitems { font-size: .88rem; color: var(--mf-ink); margin-top: 2px; overflow-wrap: anywhere; }
+.ob-hnote { font-size: .8rem; color: #8A6100; margin-top: 2px; overflow-wrap: anywhere; }
+.ob-hside { text-align: right; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.ob-htime { font-size: .8rem; color: var(--mf-ink-soft); white-space: nowrap; }
+.ob-badge { font-size: .72rem; font-weight: 700; border-radius: 999px; padding: 2px 8px; }
+.ob-badge--ok { background: var(--mf-success-bg); color: var(--mf-success); }
+.ob-badge--ko { background: var(--mf-danger-bg); color: var(--mf-danger); }
+.ob-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; }
+@media (max-width: 575.98px) {
+  .ob-hrow { flex-direction: column; }
+  .ob-hside { text-align: left; align-items: flex-start; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+}
+
+/* ---------- Mode cuisine (plein écran, texte agrandi) ---------- */
+body.ob-kitchen .mf-navbar, body.ob-kitchen .mf-security-banner, body.ob-kitchen .mf-announcement { display: none !important; }
+body.ob-kitchen { background: #ECEAE5; }
+body.ob-kitchen .ob-wrap { max-width: none; padding: 12px 16px; }
+body.ob-kitchen .ob-views { display: none; }
+body.ob-kitchen #ob-history-view { display: none !important; }
+body.ob-kitchen #ob-board-view { display: block !important; }
+body.ob-kitchen .ob-table { font-size: 1.6rem; }
+body.ob-kitchen .ob-items li { font-size: 1.2rem; padding: 5px 0; }
+body.ob-kitchen .ob-note { font-size: 1.05rem; }
+body.ob-kitchen .ob-wait { font-size: .95rem; padding: 4px 11px; }
+body.ob-kitchen .ob-next { min-height: 52px; font-size: 1.05rem; }
+body.ob-kitchen .ob-cancel { min-height: 52px; width: 52px; }
+body.ob-kitchen .ob-col-head { font-size: 1.1rem; padding: 14px 16px; }
+
+
+==================== static\orders_board.js ====================
+/* ==========================================================================
+   MenuFlash Mini — écran des commandes (cuisine) et historique.
+
+   - Tableau en direct (mise à jour toutes les 4 s, et instantanément grâce
+     au temps réel déjà présent dans app.js : son + notification).
+   - Temps d'attente coloré, notes du client bien visibles, table en grand.
+   - Annulation avec confirmation (plus d'annulation par erreur).
+   - Bouton « Activer le son » : les navigateurs bloquent le son tant qu'on
+     n'a pas touché la page.
+   - Mode cuisine : plein écran, texte agrandi, écran toujours allumé.
+   - Sur téléphone : onglets Nouvelles / En préparation / Prêtes.
+   - Historique : plus récentes en premier, heure, filtres, pages de 30,
+     « Remettre en Prête » pendant 30 min après un service par erreur.
+
+   Tout le contenu est inséré par textContent (aucune injection HTML).
+   ========================================================================== */
+(function () {
+  "use strict";
+
+  var COLS = ["nouvelle", "en_preparation", "prete"];
+  var NEXT_LABEL = { nouvelle: "Commencer la préparation", en_preparation: "Marquer prête", prete: "Marquer servie" };
+  var NEXT_ICON = { nouvelle: "bi-fire", en_preparation: "bi-check2-circle", prete: "bi-hand-thumbs-up" };
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function icon(name) { return el("i", "bi " + name); }
+  function fmt(n) { return Math.round(n || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " "); }
+  function toast(msg, isError) { if (window.MFShowToast) window.MFShowToast(msg, !!isError); }
+  function url(tpl, id) { return tpl.replace("{id}", encodeURIComponent(id)); }
+  function minutes(n) { return n < 1 ? "à l'instant" : (n < 60 ? n + " min" : Math.floor(n / 60) + " h " + (n % 60 ? (n % 60) + " min" : "")); }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var root = document.getElementById("ob-root");
+    if (!root) return;
+
+    var currency = root.dataset.currency || "";
+    var board = document.getElementById("ob-board");
+    var summary = document.getElementById("ob-summary");
+    var empty = document.getElementById("ob-empty");
+    var known = null;                     // ids déjà vus (pour l'animation "nouvelle")
+    var confirmCancel = {};               // id -> true pendant la confirmation
+    var busy = {};                        // id -> action en cours
+    var timer = null;
+    var view = "board";
+
+    /* =============================== Son =============================== */
+    var soundBtn = document.getElementById("ob-sound");
+    function soundAllowed() {
+      return !!(navigator.userActivation && navigator.userActivation.hasBeenActive) || soundBtn.dataset.on === "1";
+    }
+    function renderSound() {
+      var on = soundAllowed();
+      soundBtn.classList.toggle("is-off", !on);
+      soundBtn.classList.toggle("is-on", on);
+      soundBtn.querySelector("i").className = "bi " + (on ? "bi-volume-up-fill" : "bi-volume-mute-fill");
+      soundBtn.querySelector("span").textContent = on ? "Son activé" : "Activer le son";
+      soundBtn.title = on ? "Cliquez pour tester le son" : "Le navigateur bloque le son tant que vous n'avez pas touché la page";
+    }
+    function beep() {
+      try {
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        var ctx = new Ctx();
+        [880, 1046.5].forEach(function (f, i) {
+          var o = ctx.createOscillator(), g = ctx.createGain(), s = ctx.currentTime + i * 0.16;
+          o.type = "sine"; o.frequency.value = f;
+          g.gain.setValueAtTime(0.0001, s);
+          g.gain.exponentialRampToValueAtTime(0.35, s + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, s + 0.32);
+          o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.35);
+        });
+        setTimeout(function () { ctx.close(); }, 900);
+      } catch (e) { /* audio indisponible */ }
+    }
+    soundBtn.addEventListener("click", function () {
+      soundBtn.dataset.on = "1";
+      beep();
+      renderSound();
+      toast("Son activé : vous entendrez ce signal à chaque nouvelle commande.", false);
+    });
+    document.addEventListener("pointerdown", function () { setTimeout(renderSound, 0); }, { passive: true });
+    document.addEventListener("keydown", function () { setTimeout(renderSound, 0); });
+    renderSound();
+    setInterval(renderSound, 3000);
+
+    /* =========================== Mode cuisine =========================== */
+    var kitchenBtn = document.getElementById("ob-kitchen");
+    var wakeLock = null;
+    function requestWake() {
+      if (!("wakeLock" in navigator) || !document.body.classList.contains("ob-kitchen")) return;
+      navigator.wakeLock.request("screen").then(function (l) { wakeLock = l; }).catch(function () {});
+    }
+    function setKitchen(on) {
+      document.body.classList.toggle("ob-kitchen", on);
+      kitchenBtn.querySelector("span").textContent = on ? "Quitter le mode cuisine" : "Mode cuisine";
+      kitchenBtn.querySelector("i").className = "bi " + (on ? "bi-fullscreen-exit" : "bi-arrows-fullscreen") + " me-1";
+      try { localStorage.setItem("mf_kitchen_mode", on ? "1" : "0"); } catch (e) {}
+      if (on) {
+        if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(function () {});
+        }
+        requestWake();
+      } else {
+        if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {});
+        if (wakeLock) { wakeLock.release().catch(function () {}); wakeLock = null; }
+      }
+    }
+    kitchenBtn.addEventListener("click", function () {
+      soundBtn.dataset.on = "1"; renderSound();
+      setKitchen(!document.body.classList.contains("ob-kitchen"));
+    });
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) requestWake(); });
+    try { if (localStorage.getItem("mf_kitchen_mode") === "1") setKitchen(true); } catch (e) {}
+
+    /* ======================= Onglets (téléphone) ======================= */
+    document.querySelectorAll("[data-ob-col]").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        board.dataset.activeCol = tab.dataset.obCol;
+        document.querySelectorAll("[data-ob-col]").forEach(function (t) {
+          t.classList.toggle("is-active", t === tab);
+        });
+      });
+    });
+
+    /* ============================ Cartes ============================ */
+    function level(o) {
+      if (o.status === "prete") return o.status_minutes <= 5 ? "ok" : (o.status_minutes <= 10 ? "warn" : "late");
+      if (o.elapsed <= o.prep) return "ok";
+      return o.elapsed <= o.prep + 10 ? "warn" : "late";
+    }
+
+    function act(o, kind) {
+      if (busy[o.id]) return;
+      busy[o.id] = true;
+      var target = kind === "cancel" ? root.dataset.cancelUrl : root.dataset.advanceUrl;
+      fetch(url(target, o.id), { method: "POST", headers: { "X-Requested-With": "fetch" } })
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function () {
+          if (kind === "cancel") toast("Commande de " + o.table + " annulée.", false);
+          else if (o.status === "prete") toast(o.table + " : commande servie.", false);
+        })
+        .catch(function () { toast("Action impossible. Vérifiez votre connexion.", true); })
+        .finally(function () { delete busy[o.id]; delete confirmCancel[o.id]; refresh(); });
+    }
+
+    function card(o, isNew) {
+      var lv = level(o);
+      var c = el("article", "ob-card ob-card--" + lv + (isNew ? " is-new" : ""));
+      c.dataset.id = o.id;
+
+      var head = el("div", "ob-card-head");
+      head.appendChild(el("div", "ob-table", o.table));
+      var wait = el("div", "ob-wait ob-wait--" + lv);
+      wait.appendChild(icon("bi-clock"));
+      wait.appendChild(document.createTextNode(" " + minutes(o.status === "prete" ? o.status_minutes : o.elapsed)));
+      wait.title = o.status === "prete" ? "Prête depuis" : "Commandée à " + o.time + " · préparation prévue ~" + o.prep + " min";
+      head.appendChild(wait);
+      c.appendChild(head);
+
+      var meta = el("div", "ob-meta");
+      meta.textContent = "#" + o.id + " · " + o.time + (o.status === "prete" ? " · prête, en attente de service" : " · prévu ~" + o.prep + " min");
+      c.appendChild(meta);
+
+      var ul = el("ul", "ob-items");
+      o.items.forEach(function (it) {
+        var li = el("li");
+        li.appendChild(el("b", "ob-qty", it.quantity + "×"));
+        li.appendChild(document.createTextNode(" " + it.name));
+        ul.appendChild(li);
+      });
+      c.appendChild(ul);
+
+      if (o.notes) {
+        var note = el("div", "ob-note");
+        note.appendChild(icon("bi-exclamation-triangle-fill"));
+        note.appendChild(el("span", null, o.notes));
+        c.appendChild(note);
+      }
+
+      var foot = el("div", "ob-foot");
+      foot.appendChild(el("span", "ob-total", fmt(o.total) + " " + currency));
+
+      if (confirmCancel[o.id]) {
+        var box = el("div", "ob-confirm");
+        box.appendChild(el("span", null, "Annuler cette commande ?"));
+        var yes = el("button", "btn btn-sm btn-danger", "Oui, annuler");
+        yes.type = "button";
+        yes.addEventListener("click", function () { act(o, "cancel"); });
+        var no = el("button", "btn btn-sm btn-light", "Non");
+        no.type = "button";
+        no.addEventListener("click", function () { delete confirmCancel[o.id]; render(lastData); });
+        box.appendChild(yes); box.appendChild(no);
+        c.appendChild(foot);
+        c.appendChild(box);
+        return c;
+      }
+
+      var actions = el("div", "ob-buttons");
+      var next = el("button", "btn ob-next ob-next--" + o.status);
+      next.type = "button";
+      next.disabled = !!busy[o.id];
+      next.appendChild(icon(NEXT_ICON[o.status]));
+      next.appendChild(document.createTextNode(" " + NEXT_LABEL[o.status]));
+      next.addEventListener("click", function () { act(o, "advance"); });
+      var cancel = el("button", "btn ob-cancel");
+      cancel.type = "button";
+      cancel.title = "Annuler la commande";
+      cancel.setAttribute("aria-label", "Annuler la commande de " + o.table);
+      cancel.appendChild(icon("bi-x-lg"));
+      cancel.addEventListener("click", function () {
+        confirmCancel[o.id] = true;
+        render(lastData);
+        setTimeout(function () { if (confirmCancel[o.id]) { delete confirmCancel[o.id]; render(lastData); } }, 8000);
+      });
+      actions.appendChild(next);
+      actions.appendChild(cancel);
+      foot.appendChild(actions);
+      c.appendChild(foot);
+      return c;
+    }
+
+    /* ============================ Tableau ============================ */
+    var lastData = { orders: [], summary: {} };
+
+    function render(data) {
+      lastData = data;
+      var orders = data.orders || [];
+      var seen = {};
+      COLS.forEach(function (status) {
+        var body = document.getElementById("ob-col-" + status);
+        var list = orders.filter(function (o) { return o.status === status; });
+        document.querySelectorAll('[data-ob-count="' + status + '"]').forEach(function (b) { b.textContent = list.length; });
+        body.textContent = "";
+        if (!list.length) {
+          body.appendChild(el("p", "ob-col-empty", status === "nouvelle" ? "Aucune nouvelle commande." :
+            status === "en_preparation" ? "Rien en préparation." : "Aucune commande en attente de service."));
+          return;
+        }
+        list.forEach(function (o) {
+          seen[o.id] = true;
+          body.appendChild(card(o, known !== null && !known[o.id]));
+        });
+      });
+      known = seen;
+      board.classList.toggle("d-none", orders.length === 0);
+      document.querySelector(".ob-coltabs").classList.toggle("d-none", orders.length === 0);
+      empty.classList.toggle("d-none", orders.length !== 0);
+
+      var s = data.summary || {};
+      if (!s.active) {
+        summary.textContent = "Aucune commande en cours";
+      } else {
+        var parts = [s.active + " en cours"];
+        if (s.avg_wait) parts.push("attente moyenne " + s.avg_wait + " min");
+        if (s.oldest_table) parts.push("plus ancienne : " + s.oldest_table + " (" + minutes(s.oldest_minutes) + ")");
+        summary.textContent = parts.join(" · ");
+      }
+    }
+
+    function refresh() {
+      return fetch(root.dataset.feedUrl, { cache: "no-store", headers: { "X-Requested-With": "fetch" } })
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(render)
+        .catch(function () { summary.textContent = "Connexion perdue, nouvelle tentative…"; });
+    }
+
+    // Le temps réel de app.js (annulation par un client) rafraîchit aussi le tableau.
+    window.MFKanbanRefreshWithCancelAnimation = function () { refresh(); };
+
+    /* =========================== Historique =========================== */
+    var hist = { filter: "today", page: 1 };
+    var histList = document.getElementById("ob-history");
+    var pager = document.getElementById("ob-pager");
+
+    function statusBadge(o) {
+      if (o.status === "servie") return el("span", "ob-badge ob-badge--ok", "Servie");
+      return el("span", "ob-badge ob-badge--ko", o.cancelled_by === "client" ? "Annulée par le client" : "Annulée");
+    }
+
+    function renderHistory(data) {
+      histList.textContent = "";
+      document.getElementById("ob-history-count").textContent = data.total + " commande" + (data.total > 1 ? "s" : "");
+      if (!data.orders.length) {
+        histList.appendChild(el("p", "ob-col-empty text-center py-4",
+          hist.filter === "today" ? "Aucune commande terminée aujourd'hui." : "Aucune commande dans ce filtre."));
+      }
+      data.orders.forEach(function (o) {
+        var row = el("div", "ob-hrow");
+        var left = el("div", "ob-hmain");
+        var top = el("div", "ob-htop");
+        top.appendChild(el("strong", null, o.table));
+        top.appendChild(statusBadge(o));
+        left.appendChild(top);
+        left.appendChild(el("div", "ob-hitems", o.items.map(function (it) { return it.quantity + "× " + it.name; }).join(", ")));
+        if (o.notes) left.appendChild(el("div", "ob-hnote", "Note : " + o.notes));
+        var right = el("div", "ob-hside");
+        right.appendChild(el("div", "ob-htime", (o.today ? o.created_time : o.created) + " → " + o.finished_time));
+        right.appendChild(el("div", "ob-total", fmt(o.total) + " " + currency));
+        if (o.can_undo) {
+          var undo = el("button", "btn btn-sm btn-outline-secondary mt-1");
+          undo.type = "button";
+          undo.appendChild(icon("bi-arrow-counterclockwise"));
+          undo.appendChild(document.createTextNode(" Remettre en Prête"));
+          undo.title = "Servie par erreur ? Possible pendant 30 minutes.";
+          undo.addEventListener("click", function () {
+            undo.disabled = true;
+            fetch(url(root.dataset.undoUrl, o.id), { method: "POST", headers: { "X-Requested-With": "fetch" } })
+              .then(function (r) { return r.json().then(function (d) { return { ok: r.ok && d.ok, d: d }; }); })
+              .then(function (res) {
+                if (res.ok) { toast(o.table + " : commande remise en « Prête ».", false); refresh(); }
+                else toast(res.d.error || "Action impossible.", true);
+                loadHistory();
+              })
+              .catch(function () { undo.disabled = false; toast("Action impossible. Vérifiez votre connexion.", true); });
+          });
+          right.appendChild(undo);
+        }
+        row.appendChild(left); row.appendChild(right);
+        histList.appendChild(row);
+      });
+      pager.classList.toggle("d-none", data.pages <= 1);
+      document.getElementById("ob-page").textContent = "Page " + data.page + " / " + data.pages;
+      document.getElementById("ob-prev").disabled = data.page <= 1;
+      document.getElementById("ob-next").disabled = data.page >= data.pages;
+      hist.page = data.page;
+    }
+
+    function loadHistory() {
+      var u = root.dataset.historyUrl + "?filtre=" + encodeURIComponent(hist.filter) + "&page=" + hist.page;
+      return fetch(u, { cache: "no-store", headers: { "X-Requested-With": "fetch" } })
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(renderHistory)
+        .catch(function () { toast("Impossible de charger l'historique.", true); });
+    }
+
+    document.querySelectorAll("[data-ob-filter]").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        hist.filter = chip.dataset.obFilter; hist.page = 1;
+        document.querySelectorAll("[data-ob-filter]").forEach(function (c) { c.classList.toggle("is-active", c === chip); });
+        loadHistory();
+      });
+    });
+    document.getElementById("ob-prev").addEventListener("click", function () { hist.page = Math.max(1, hist.page - 1); loadHistory(); });
+    document.getElementById("ob-next").addEventListener("click", function () { hist.page += 1; loadHistory(); });
+
+    /* ============================ Vues ============================ */
+    function setView(v) {
+      view = v;
+      document.getElementById("ob-board-view").classList.toggle("d-none", v !== "board");
+      document.getElementById("ob-history-view").classList.toggle("d-none", v !== "history");
+      document.querySelectorAll("[data-ob-view]").forEach(function (b) {
+        b.classList.toggle("is-active", b.dataset.obView === v);
+        b.setAttribute("aria-selected", b.dataset.obView === v ? "true" : "false");
+      });
+      if (v === "history") loadHistory();
+      schedule();
+    }
+    document.querySelectorAll("[data-ob-view]").forEach(function (b) {
+      b.addEventListener("click", function () { setView(b.dataset.obView); });
+    });
+
+    function tick() {
+      if (view === "board") refresh(); else loadHistory();
+    }
+    function schedule() {
+      clearInterval(timer);
+      timer = setInterval(tick, document.hidden ? 20000 : (view === "board" ? 4000 : 15000));
+    }
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) tick(); schedule(); });
+
+    refresh();
+    setView(root.dataset.startView === "history" ? "history" : "board");
+  });
+})();
 
 
 ==================== static\orders_cleanup.js ====================
@@ -9827,7 +11374,14 @@ document.addEventListener("DOMContentLoaded", function () {
 {% block content %}
 {% include "_admin_navbar.html" %}
 
-<div class="container py-4" style="max-width: 1040px;">
+{# Compteurs calculés côté serveur (la composition est ajoutée par menu_admin.js). #}
+{% set ns = namespace(total=0, soldout=0) %}
+{% for c in categories %}{% for i in c.items %}
+  {% set ns.total = ns.total + 1 %}
+  {% if not i.is_available %}{% set ns.soldout = ns.soldout + 1 %}{% endif %}
+{% endfor %}{% endfor %}
+
+<div class="container py-4" style="max-width: 1080px;">
   {% if not restaurant.is_subscription_valid %}
     <div class="alert alert-danger d-flex align-items-center gap-2 mf-animate-in">
       <i class="bi bi-exclamation-octagon-fill"></i>
@@ -9841,189 +11395,330 @@ document.addEventListener("DOMContentLoaded", function () {
   {% endif %}
 
   <div id="mf-orders-banner"
-     class="alert d-flex align-items-center gap-2 mf-animate-in {{ '' if active_orders_count else 'd-none' }}"
-     style="background: var(--mf-accent-light); color: var(--mf-accent-dark);">
-  <i class="bi bi-receipt-cutoff"></i>
-  <span id="mf-orders-banner-text">
-    Vous avez {{ active_orders_count }} commande{{ 's' if active_orders_count != 1 else '' }} en cours.
-  </span>
-  <a href="{{ url_for('admin_orders') }}" class="fw-bold ms-auto">Voir les commandes →</a>
-</div>
-
-  <div class="alert alert-light border small mb-4">
-    <i class="bi bi-arrows-move me-1"></i>
-    Glissez-déposez les catégories ou les plats (via l'icône ⠿) pour changer leur ordre d'affichage sur le menu public.
-    <strong>Mode rush :</strong> mettez une catégorie entière en pause si la cuisine est débordée.
-    Utilisez l'icône <i class="bi bi-pencil-square"></i> pour modifier un plat ou le nom d'une catégorie, et
-    y associer des <strong>suggestions de vente additionnelle</strong> (ex : proposer un Bissap avec le Riz au gras).
+       class="alert d-flex align-items-center gap-2 mf-animate-in {{ '' if active_orders_count else 'd-none' }}"
+       style="background: var(--mf-accent-light); color: var(--mf-accent-dark);">
+    <i class="bi bi-receipt-cutoff"></i>
+    <span id="mf-orders-banner-text">
+      Vous avez {{ active_orders_count }} commande{{ 's' if active_orders_count != 1 else '' }} en cours.
+    </span>
+    <a href="{{ url_for('admin_orders') }}" class="fw-bold ms-auto">Voir les commandes →</a>
   </div>
 
-  <div class="card mf-section-card mb-4">
-    <div class="card-body d-flex align-items-center gap-3 flex-wrap">
-      <span class="mf-section-title">Nouvelle catégorie</span>
-      <form method="post" action="{{ url_for('add_category') }}" class="d-flex gap-2 flex-grow-1" style="min-width: 220px;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="text" name="name" class="form-control" maxlength="80" placeholder="Ex : Entrées, Plats, Boissons…" required>
-        <button type="submit" class="btn btn-primary text-nowrap"><i class="bi bi-plus-lg me-1"></i>Ajouter</button>
-      </form>
+  {# ------------------------------ En-tête ------------------------------ #}
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="me-auto">
+      <h1 class="h4 fw-bold mb-0">Votre menu</h1>
+      <div class="small text-secondary">
+        {{ categories|length }} catégorie{{ 's' if categories|length != 1 }} · {{ ns.total }} plat{{ 's' if ns.total != 1 }}
+      </div>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('public_menu', slug=restaurant.slug) }}" target="_blank" rel="noopener">
+      <i class="bi bi-eye me-1"></i>Aperçu client</a>
+    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#mf-add-category-modal">
+      <i class="bi bi-folder-plus me-1"></i>Nouvelle catégorie</button>
+    <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#mf-add-item-modal"
+            {{ 'disabled' if not categories }}>
+      <i class="bi bi-plus-lg me-1"></i>Ajouter un plat</button>
+  </div>
+
+  {# --------------------- Rappel : plats à compléter --------------------- #}
+  <div class="mf-menu-tip d-none" id="mf-incomplete-tip" role="status">
+    <i class="bi bi-lightbulb-fill"></i>
+    <div class="flex-grow-1">
+      <strong id="mf-incomplete-title"></strong>
+      <div class="small" id="mf-incomplete-detail"></div>
+    </div>
+    <button type="button" class="btn btn-sm btn-light" data-mf-filter-shortcut="incomplete">Afficher</button>
+  </div>
+
+  {# ------------------------- Recherche et filtres ------------------------- #}
+  {% if ns.total %}
+  <div class="mf-menu-toolbar card mf-section-card mb-3">
+    <div class="card-body d-flex flex-wrap align-items-center gap-2 py-2">
+      <div class="mf-menu-search flex-grow-1">
+        <i class="bi bi-search"></i>
+        <input type="search" id="mf-menu-search" class="form-control" placeholder="Rechercher un plat…" title="Raccourci clavier : /"
+               maxlength="60" autocomplete="off" aria-label="Rechercher un plat">
+      </div>
+      <div class="mf-chips" role="group" aria-label="Filtrer les plats">
+        <button type="button" class="mf-chip is-active" data-mf-filter="all">Tous <span>{{ ns.total }}</span></button>
+        <button type="button" class="mf-chip" data-mf-filter="soldout">Épuisés <span id="mf-count-soldout">{{ ns.soldout }}</span></button>
+        <button type="button" class="mf-chip" data-mf-filter="incomplete">À compléter <span id="mf-count-incomplete">0</span></button>
+      </div>
+      <button type="button" class="btn btn-sm btn-link text-secondary text-decoration-none" id="mf-toggle-all">
+        <i class="bi bi-arrows-collapse me-1"></i><span>Tout replier</span></button>
     </div>
   </div>
+  <p class="small text-secondary d-none" id="mf-search-result" aria-live="polite"></p>
+  {% endif %}
 
-  <div id="categories-list" data-reorder-url="{{ url_for('reorder_categories') }}">
+  {# ------------------------------ Catégories ------------------------------ #}
+  <div id="categories-list" data-reorder-url="{{ url_for('reorder_categories') }}" data-restaurant="{{ restaurant.id }}">
     {% for category in categories %}
-      <div class="card mf-section-card mb-3 mf-category-block {{ 'mf-category-paused' if category.is_paused else '' }}" data-id="{{ category.id }}">
+      <div class="card mf-section-card mb-3 mf-category-block {{ 'mf-category-paused' if category.is_paused }}" data-id="{{ category.id }}">
         <div class="card-body">
-          <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
-            <span class="mf-drag-handle">⠿</span>
-            <h2 class="h6 mb-0 fw-bold">{{ category.name }}</h2>
-            <button type="button" class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 mf-edit-category-btn"
+          <div class="mf-cat-head">
+            <span class="mf-drag-handle" data-mf-tip="Glisser pour réordonner">⠿</span>
+            <button type="button" class="mf-cat-toggle" aria-expanded="true">
+              <i class="bi bi-chevron-down mf-cat-chevron"></i>
+              <h2 class="h6 mb-0 fw-bold">{{ category.name }}</h2>
+              <span class="mf-cat-count">{{ category.items|length }}</span>
+            </button>
+            <button type="button" class="btn btn-sm mf-icon-btn mf-edit-category-btn"
                     data-bs-toggle="modal" data-bs-target="#edit-category-modal"
                     data-category-id="{{ category.id }}" data-category-name="{{ category.name }}"
-                    title="Renommer la catégorie">
-              <i class="bi bi-pencil-square"></i>
+                    data-mf-tip="Renommer la catégorie" aria-label="Renommer la catégorie {{ category.name }}">
+              <i class="bi bi-pencil"></i>
             </button>
             {% if category.is_paused %}
-              <span class="badge" style="background:#F8E0DD; color:#C4453A;"><i class="bi bi-pause-circle-fill me-1"></i>En pause</span>
+              <span class="mf-paused-badge"><i class="bi bi-pause-circle-fill me-1"></i>En pause · masquée aux clients</span>
             {% endif %}
-            <form method="post" action="{{ url_for('toggle_category_pause', category_id=category.id) }}" class="ms-auto">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn btn-sm {{ 'btn-outline-secondary' if category.is_paused else 'btn-outline-danger' }}">
+            <div class="ms-auto d-flex align-items-center gap-1">
+              <button type="button" class="btn btn-sm btn-outline-secondary mf-cat-add"
+                      data-bs-toggle="modal" data-bs-target="#mf-add-item-modal" data-category-id="{{ category.id }}">
+                <i class="bi bi-plus-lg"></i><span class="d-none d-sm-inline ms-1">Plat</span></button>
+              <form method="post" action="{{ url_for('toggle_category_pause', category_id=category.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 {% if category.is_paused %}
-                  <i class="bi bi-play-circle me-1"></i>Réactiver
+                  <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-play-fill me-1"></i>Réactiver</button>
                 {% else %}
-                  <i class="bi bi-pause-circle me-1"></i>Mettre en pause
+                  <button type="submit" class="btn btn-sm mf-icon-btn"
+                          data-mf-tip="Mode rush : masquer cette catégorie aux clients" aria-label="Mettre en pause {{ category.name }}">
+                    <i class="bi bi-pause-circle"></i></button>
                 {% endif %}
-              </button>
-            </form>
+              </form>
+            </div>
           </div>
 
-          <form method="post" action="{{ url_for('add_item') }}" enctype="multipart/form-data"
-                class="row g-2 align-items-center mb-3 p-2 rounded" style="background: var(--mf-bg);">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="category_id" value="{{ category.id }}">
-            <div class="col-md-3"><input type="text" name="name" class="form-control form-control-sm" maxlength="120" placeholder="Nom du plat" required></div>
-            <div class="col-md-2"><input type="text" name="description" class="form-control form-control-sm" maxlength="300" placeholder="Description"></div>
-            <div class="col-md-2"><input type="number" name="price" class="form-control form-control-sm" placeholder="Prix (FCFA)" required></div>
-            <div class="col-md-2">
-              <div class="input-group input-group-sm">
-                <span class="input-group-text"><i class="bi bi-clock-history"></i></span>
-                <input type="number" name="prep_minutes" class="form-control" placeholder="Min." value="10" min="1" max="180">
-              </div>
-            </div>
-            <div class="col-md-2"><input type="file" name="photo" accept="image/*" class="form-control form-control-sm"></div>
-            <div class="col-md-1"><button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-plus-lg"></i></button></div>
-          </form>
-
-          {% if category.items %}
-            <table class="table align-middle mb-0">
-              <thead>
-                <tr class="small text-secondary text-uppercase">
-                  <th style="width:28px;"></th><th>Plat</th><th>Prix</th><th>Préparation</th><th>Disponibilité</th><th></th>
-                </tr>
-              </thead>
-              <tbody class="mf-items-tbody" data-reorder-url="{{ url_for('reorder_items') }}" data-category-id="{{ category.id }}">
-                {% for item in category.items %}
-                  <tr data-id="{{ item.id }}">
-                    <td class="text-center"><span class="mf-drag-handle">⠿</span></td>
-                    <td>
-                      <div class="d-flex align-items-center gap-2">
-                        {% if item.photo_url %}
-                          <img src="{{ item.photo_url }}" class="mf-thumb">
-                        {% else %}
-                          <div class="mf-thumb-empty"><i class="bi bi-egg-fried"></i></div>
-                        {% endif %}
-                        <div>
-                          <div class="fw-semibold">{{ item.name }}</div>
-                          {% if item.description %}<div class="small text-secondary">{{ item.description }}</div>{% endif %}
-                          {% if item_suggestion_ids.get(item.id) %}
-                            <div class="small" style="color: var(--mf-accent-dark);">
-                              <i class="bi bi-tags-fill me-1"></i>{{ item_suggestion_ids[item.id]|length }} suggestion{{ 's' if item_suggestion_ids[item.id]|length != 1 else '' }}
-                            </div>
-                          {% endif %}
-                        </div>
-                      </div>
-                    </td>
-                    <td class="fw-bold" style="color: var(--mf-accent-dark);">{{ "{:,}".format(item.price).replace(",", " ") }} {{ restaurant.currency }}</td>
-                    <td class="small text-secondary"><i class="bi bi-clock-history me-1"></i>~{{ item.prep_minutes }} min</td>
-                    <td>
-                      <form method="post" action="{{ url_for('toggle_item', item_id=item.id) }}" class="d-inline">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-sm mf-pill-toggle border-0 {{ 'mf-pill-on' if item.is_available else 'mf-pill-off' }}">
-                          <i class="bi {{ 'bi-check-circle-fill' if item.is_available else 'bi-x-circle-fill' }} me-1"></i>
-                          {{ 'Disponible' if item.is_available else 'Épuisé' }}
-                        </button>
-                      </form>
-                    </td>
-                    <td>
-                      <div class="d-flex gap-1">
-                        <button type="button" class="btn btn-sm btn-outline-secondary border-0 mf-edit-item-btn"
-                                data-bs-toggle="modal" data-bs-target="#edit-item-modal"
-                                data-item-id="{{ item.id }}" data-item-name="{{ item.name }}"
-                                data-item-description="{{ item.description or '' }}" data-item-price="{{ item.price }}"
-                                data-item-prep="{{ item.prep_minutes }}" data-item-photo="{{ item.photo_url or '' }}"
-                                data-item-suggestions="{{ item_suggestion_ids.get(item.id, [])|join(',') }}"
-                                title="Modifier ce plat">
-                          <i class="bi bi-pencil-square"></i>
-                        </button>
-                        <form method="post" action="{{ url_for('delete_item', item_id=item.id) }}"
-                              class="mf-confirm d-inline" data-confirm-message="Supprimer définitivement ce plat ?">
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                          <button type="submit" class="btn btn-sm btn-outline-danger border-0"><i class="bi bi-trash3"></i></button>
-                        </form>
-                      </div>
-                    </td>
+          <div class="mf-cat-body">
+            {% if category.items %}
+              <table class="table align-middle mb-0 mf-menu-table">
+                <colgroup>
+                  <col style="width: 30px;"><col><col style="width: 120px;"><col style="width: 110px;">
+                  <col style="width: 150px;"><col style="width: 56px;">
+                </colgroup>
+                <thead>
+                  <tr class="small text-secondary text-uppercase">
+                    <th></th><th>Plat</th><th>Prix</th><th>Préparation</th><th>Disponibilité</th><th class="text-end"><span class="visually-hidden">Actions</span></th>
                   </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          {% else %}
-            <p class="text-secondary small mb-0">Aucun plat dans cette catégorie pour l'instant.</p>
-          {% endif %}
+                </thead>
+                <tbody class="mf-items-tbody" data-reorder-url="{{ url_for('reorder_items') }}" data-category-id="{{ category.id }}">
+                  {% for item in category.items %}
+                    <tr data-id="{{ item.id }}" class="mf-item-row {{ 'is-soldout' if not item.is_available }}"
+                        data-search="{{ (item.name ~ ' ' ~ (item.description or ''))|lower }}"
+                        data-has-photo="{{ 1 if item.photo_url else 0 }}" data-has-desc="{{ 1 if item.description else 0 }}">
+                      <td class="text-center"><span class="mf-drag-handle" data-mf-tip="Glisser pour réordonner">⠿</span></td>
+                      <td>
+                        <div class="d-flex align-items-center gap-2 mf-item-info">
+                          {% if item.photo_url %}
+                            <img src="{{ item.photo_url }}" class="mf-thumb" alt="" loading="lazy">
+                          {% else %}
+                            <div class="mf-thumb-empty"><i class="bi bi-image"></i></div>
+                          {% endif %}
+                          <div class="min-w-0">
+                            <div class="fw-semibold mf-item-name">{{ item.name }}</div>
+                            {% if item.description %}<div class="small text-secondary mf-item-desc-admin">{{ item.description }}</div>{% endif %}
+                            <div class="mf-item-meta">
+                              {% if item_suggestion_ids.get(item.id) %}
+                                <span class="mf-meta-pill"><i class="bi bi-tags-fill"></i>{{ item_suggestion_ids[item.id]|length }} suggestion{{ 's' if item_suggestion_ids[item.id]|length != 1 }}</span>
+                              {% endif %}
+                              <span class="mf-meta-pill mf-meta-warn d-none" data-mf-incomplete></span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="fw-bold text-nowrap" style="color: var(--mf-accent-dark);">{{ "{:,}".format(item.price).replace(",", " ") }} {{ restaurant.currency }}</td>
+                      <td class="small text-secondary text-nowrap"><i class="bi bi-clock-history me-1"></i>~{{ item.prep_minutes }} min</td>
+                      <td>
+                        <form method="post" action="{{ url_for('toggle_item', item_id=item.id) }}" class="mf-avail-form">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <div class="form-check form-switch m-0">
+                            <input class="form-check-input mf-avail-switch" type="checkbox" role="switch"
+                                   id="avail-{{ item.id }}" {{ 'checked' if item.is_available }}>
+                            <label class="form-check-label small mf-avail-label" for="avail-{{ item.id }}">{{ 'Disponible' if item.is_available else 'Épuisé' }}</label>
+                          </div>
+                          <noscript><button type="submit" class="btn btn-sm btn-link p-0">Changer</button></noscript>
+                        </form>
+                      </td>
+                      <td class="text-end">
+                        <div class="dropdown">
+                          <button type="button" class="btn btn-sm mf-icon-btn mf-actions-toggle" data-bs-toggle="dropdown"
+                                  aria-expanded="false" aria-label="Actions pour {{ item.name }}">
+                            <i class="bi bi-three-dots-vertical"></i>
+                          </button>
+                          <ul class="dropdown-menu dropdown-menu-end shadow-sm mf-actions-menu">
+                            <li><button type="button" class="dropdown-item mf-edit-item-btn"
+                                    data-bs-toggle="modal" data-bs-target="#edit-item-modal"
+                                    data-item-id="{{ item.id }}" data-item-name="{{ item.name }}"
+                                    data-item-description="{{ item.description or '' }}" data-item-price="{{ item.price }}"
+                                    data-item-prep="{{ item.prep_minutes }}" data-item-photo="{{ item.photo_url or '' }}"
+                                    data-item-suggestions="{{ item_suggestion_ids.get(item.id, [])|join(',') }}">
+                              <i class="bi bi-pencil me-2"></i>Modifier le plat</button></li>
+                            <li><button type="button" class="dropdown-item mf-comp-open"
+                                    data-item-id="{{ item.id }}" data-item-name="{{ item.name }}">
+                              <i class="bi bi-list-check me-2"></i>Composition &amp; allergènes</button></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                              <form method="post" action="{{ url_for('delete_item', item_id=item.id) }}"
+                                    class="mf-confirm" data-confirm-message="Supprimer définitivement « {{ item.name }} » ?">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="dropdown-item text-danger"><i class="bi bi-trash3 me-2"></i>Supprimer</button>
+                              </form>
+                            </li>
+                          </ul>
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              <div class="mf-show-more d-none">
+                <button type="button" class="btn btn-sm btn-light w-100"></button>
+              </div>
+            {% else %}
+              <div class="mf-cat-empty">
+                <i class="bi bi-egg-fried"></i>
+                <span>Aucun plat dans cette catégorie.</span>
+                <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#mf-add-item-modal"
+                        data-category-id="{{ category.id }}"><i class="bi bi-plus-lg me-1"></i>Ajouter le premier plat</button>
+              </div>
+            {% endif %}
+          </div>
         </div>
       </div>
+    {% else %}
+      <div class="card mf-section-card"><div class="card-body text-center py-5">
+        <i class="bi bi-journal-plus" style="font-size: 2.4rem; color: var(--mf-accent);"></i>
+        <h2 class="h5 fw-bold mt-3">Commencez votre menu</h2>
+        <p class="text-secondary small mb-3">Créez d'abord une catégorie (Entrées, Plats, Boissons…), puis ajoutez vos plats.</p>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#mf-add-category-modal">
+          <i class="bi bi-folder-plus me-1"></i>Créer ma première catégorie</button>
+      </div></div>
     {% endfor %}
+  </div>
+
+  <div class="text-center text-secondary py-4 d-none" id="mf-no-results">
+    <i class="bi bi-search" style="font-size: 1.6rem;"></i>
+    <p class="mb-1 mt-2" id="mf-no-results-text"></p>
+    <button type="button" class="btn btn-sm btn-link" id="mf-clear-filters">Effacer la recherche et les filtres</button>
+  </div>
+
+  {% if ns.total %}
+    <p class="small text-secondary text-center mt-2 mb-0">
+      <i class="bi bi-arrows-move me-1"></i>Glissez l'icône ⠿ pour changer l'ordre des catégories et des plats sur le menu client.
+    </p>
+  {% endif %}
+</div>
+
+{# ------------------------- Modale : ajouter un plat ------------------------- #}
+<div class="modal fade" id="mf-add-item-modal" tabindex="-1" aria-labelledby="mf-add-item-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form method="post" action="{{ url_for('add_item') }}" enctype="multipart/form-data" class="modal-content" data-mf-guard>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header border-0">
+        <h5 class="modal-title" id="mf-add-item-title"><i class="bi bi-plus-circle me-2"></i>Ajouter un plat</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label small fw-semibold" for="add-item-category">Catégorie</label>
+            <select name="category_id" id="add-item-category" class="form-select" required>
+              {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label small fw-semibold" for="add-item-name">Nom du plat</label>
+            <input type="text" name="name" id="add-item-name" class="form-control" maxlength="120" required
+                   placeholder="Ex : Riz au gras">
+          </div>
+          <div class="col-12">
+            <label class="form-label small fw-semibold" for="add-item-desc">Description <span class="text-secondary fw-normal">(recommandé)</span></label>
+            <textarea name="description" id="add-item-desc" class="form-control" rows="2" maxlength="300"
+                      placeholder="Ex : Riz parfumé, viande de bœuf, légumes"></textarea>
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-semibold" for="add-item-price">Prix ({{ restaurant.currency }})</label>
+            <input type="number" name="price" id="add-item-price" class="form-control" min="0" max="10000000" step="1" required inputmode="numeric">
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-semibold" for="add-item-prep">Préparation (min)</label>
+            <input type="number" name="prep_minutes" id="add-item-prep" class="form-control" value="10" min="1" max="180" inputmode="numeric">
+          </div>
+          <div class="col-12">
+            <label class="form-label small fw-semibold">Photo <span class="text-secondary fw-normal">(recommandé : les plats avec photo se vendent mieux)</span></label>
+            <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" class="form-control">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Ajouter le plat</button>
+      </div>
+    </form>
   </div>
 </div>
 
+{# ----------------------- Modale : nouvelle catégorie ----------------------- #}
+<div class="modal fade" id="mf-add-category-modal" tabindex="-1" aria-labelledby="mf-add-category-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <form method="post" action="{{ url_for('add_category') }}" class="modal-content" data-mf-guard>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header border-0">
+        <h5 class="modal-title" id="mf-add-category-title"><i class="bi bi-folder-plus me-2"></i>Nouvelle catégorie</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label small fw-semibold" for="add-category-name">Nom</label>
+        <input type="text" name="name" id="add-category-name" class="form-control" maxlength="80" required
+               placeholder="Ex : Entrées, Plats, Boissons…">
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary">Créer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# -------------------------- Modale : modifier un plat -------------------------- #}
 <div class="modal fade" id="edit-item-modal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <form method="post" id="edit-item-form" enctype="multipart/form-data" class="modal-content">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <form method="post" id="edit-item-form" enctype="multipart/form-data" class="modal-content" data-mf-guard>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="modal-header border-0">
         <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Modifier le plat</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
       </div>
       <div class="modal-body">
-        <div class="row g-2">
+        <div class="row g-3">
           <div class="col-12">
-            <label class="form-label small">Nom du plat</label>
+            <label class="form-label small fw-semibold" for="edit-item-name">Nom du plat</label>
             <input type="text" name="name" id="edit-item-name" class="form-control" maxlength="120" required>
           </div>
           <div class="col-12">
-            <label class="form-label small">Description</label>
-            <input type="text" name="description" id="edit-item-description" class="form-control" maxlength="300">
+            <label class="form-label small fw-semibold" for="edit-item-description">Description</label>
+            <textarea name="description" id="edit-item-description" class="form-control" rows="2" maxlength="300"></textarea>
           </div>
           <div class="col-6">
-            <label class="form-label small">Prix (FCFA)</label>
-            <input type="number" name="price" id="edit-item-price" class="form-control" required>
+            <label class="form-label small fw-semibold" for="edit-item-price">Prix ({{ restaurant.currency }})</label>
+            <input type="number" name="price" id="edit-item-price" class="form-control" min="0" max="10000000" required>
           </div>
           <div class="col-6">
-            <label class="form-label small">Préparation (min)</label>
+            <label class="form-label small fw-semibold" for="edit-item-prep">Préparation (min)</label>
             <input type="number" name="prep_minutes" id="edit-item-prep" class="form-control" min="1" max="180">
           </div>
           <div class="col-12">
-            <label class="form-label small">Remplacer la photo (optionnel)</label>
-            <input type="file" name="photo" accept="image/*" class="form-control">
+            <label class="form-label small fw-semibold">Remplacer la photo (optionnel)</label>
+            <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" class="form-control">
             <div class="small text-secondary mt-1" id="edit-item-current-photo"></div>
           </div>
           <div class="col-12">
-            <hr class="my-2">
+            <hr class="my-1">
             <label class="form-label small fw-semibold">
               <i class="bi bi-tags-fill me-1" style="color: var(--mf-accent-dark);"></i>Suggestions de vente additionnelle
             </label>
-            <p class="small text-secondary mb-2">
-              Ces plats seront suggérés au client juste avant l'envoi de sa commande, dès qu'il ajoute celui-ci.
-            </p>
+            <p class="small text-secondary mb-2">Ces plats seront proposés au client juste avant l'envoi de sa commande, s'il a choisi celui-ci.</p>
             <div class="mf-suggestion-list" id="edit-item-suggestions-list">
               {% for cat in categories %}
                 {% for other_item in cat.items %}
@@ -10048,21 +11743,22 @@ document.addEventListener("DOMContentLoaded", function () {
   </div>
 </div>
 
+{# ------------------------ Modale : renommer une catégorie ------------------------ #}
 <div class="modal fade" id="edit-category-modal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <form method="post" id="edit-category-form" class="modal-content">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <form method="post" id="edit-category-form" class="modal-content" data-mf-guard>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="modal-header border-0">
-        <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Renommer la catégorie</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Renommer la catégorie</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
       </div>
       <div class="modal-body">
-        <label class="form-label small">Nom de la catégorie</label>
+        <label class="form-label small fw-semibold" for="edit-category-name">Nom de la catégorie</label>
         <input type="text" name="name" id="edit-category-name" class="form-control" maxlength="80" required>
       </div>
       <div class="modal-footer border-0">
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
-        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Enregistrer</button>
+        <button type="submit" class="btn btn-primary">Enregistrer</button>
       </div>
     </form>
   </div>
@@ -10076,27 +11772,20 @@ document.addEventListener("DOMContentLoaded", function () {
   document.querySelectorAll(".mf-edit-item-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var itemId = btn.dataset.itemId;
-      editItemForm.action = "/admin/items/" + itemId + "/edit";
+      editItemForm.action = "/admin/items/" + encodeURIComponent(itemId) + "/edit";
       document.getElementById("edit-item-name").value = btn.dataset.itemName || "";
       document.getElementById("edit-item-description").value = btn.dataset.itemDescription || "";
       document.getElementById("edit-item-price").value = btn.dataset.itemPrice || "";
       document.getElementById("edit-item-prep").value = btn.dataset.itemPrep || "10";
-      var photoNote = document.getElementById("edit-item-current-photo");
-      photoNote.textContent = btn.dataset.itemPhoto
+      document.getElementById("edit-item-current-photo").textContent = btn.dataset.itemPhoto
         ? "Une photo est déjà associée à ce plat ; choisissez un fichier uniquement pour la remplacer."
-        : "Aucune photo actuellement associée à ce plat.";
-
+        : "Aucune photo pour ce plat pour l'instant.";
       var suggestionIds = (btn.dataset.itemSuggestions || "").split(",").filter(Boolean);
       document.querySelectorAll("#edit-item-suggestions-list .mf-suggestion-check").forEach(function (row) {
-        var rid = row.dataset.itemId;
         var checkbox = row.querySelector("input[type=checkbox]");
-        if (rid === itemId) {
-          row.style.display = "none";
-          checkbox.checked = false;
-        } else {
-          row.style.display = "";
-          checkbox.checked = suggestionIds.indexOf(rid) !== -1;
-        }
+        var self = row.dataset.itemId === itemId;
+        row.style.display = self ? "none" : "";
+        checkbox.checked = !self && suggestionIds.indexOf(row.dataset.itemId) !== -1;
       });
     });
   });
@@ -10104,15 +11793,13 @@ document.addEventListener("DOMContentLoaded", function () {
   var editCategoryForm = document.getElementById("edit-category-form");
   document.querySelectorAll(".mf-edit-category-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {
-      var categoryId = btn.dataset.categoryId;
-      editCategoryForm.action = "/admin/categories/" + categoryId + "/edit";
+      editCategoryForm.action = "/admin/categories/" + encodeURIComponent(btn.dataset.categoryId) + "/edit";
       document.getElementById("edit-category-name").value = btn.dataset.categoryName || "";
     });
   });
 });
 </script>
 {% endblock %}
-
 
 
 ==================== templates\admin_history.html ====================
@@ -10323,169 +12010,100 @@ document.addEventListener("DOMContentLoaded", function () {
 ==================== templates\admin_orders.html ====================
 {% extends "base.html" %}
 {% block title %}Commandes — {{ restaurant.name }}{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='orders_board.css') }}?v=1">
+{% endblock %}
 {% block content %}
 {% include "_admin_navbar.html" %}
 
-{% if not current_user.is_owner %}
-  <div class="container pt-3" style="max-width: 1040px;">
-    <div class="alert alert-light border small mb-0">
-      <i class="bi bi-info-circle-fill me-1" style="color: var(--mf-accent);"></i>
-      Vous avez accès uniquement à cette page : réceptionner les commandes et mettre à jour leur statut.
-      Les nouvelles commandes apparaissent automatiquement, avec un signal sonore. Si un client annule sa
-      commande avant qu'elle ne soit en préparation, elle disparaît instantanément de cette liste.
-    </div>
-  </div>
-{% endif %}
+<div class="container-fluid ob-wrap" id="ob-root"
+     data-feed-url="{{ url_for('orders_board_feed') }}"
+     data-history-url="{{ url_for('orders_history_feed') }}"
+     data-advance-url="/admin/commandes/{id}/avancer"
+     data-cancel-url="/admin/commandes/{id}/annuler"
+     data-undo-url="/admin/commandes/{id}/remettre-prete"
+     data-currency="{{ restaurant.currency }}"
+     data-start-view="{{ 'history' if show_all else 'board' }}">
 
-<div class="container py-4" style="max-width: 1040px;">
-  {% if current_user.is_owner %}
-    <div class="d-flex justify-content-end mb-3">
-      {% if show_all %}
-        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_orders') }}"><i class="bi bi-arrow-counterclockwise me-1"></i>Commandes en cours</a>
-      {% else %}
-        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_orders', all=1) }}"><i class="bi bi-clock-history me-1"></i>Voir l'historique</a>
+  {# ------------------------------ Barre d'outils ------------------------------ #}
+  <div class="ob-toolbar">
+    <div class="ob-title">
+      <h1 class="h5 fw-bold mb-0">Commandes</h1>
+      <div class="ob-summary" id="ob-summary" aria-live="polite">Chargement…</div>
+    </div>
+    <div class="ob-actions">
+      {% if current_user.is_owner %}
+        <span class="mf-live-indicator" id="live-indicator" title="Connexion temps réel">
+          <span class="mf-live-dot"></span> En direct
+        </span>
       {% endif %}
-    </div>
-  {% endif %}
-
-  <div id="kanban-root"
-       data-feed-url="{{ url_for('admin_orders_feed') }}"
-       data-currency="{{ restaurant.currency }}">
-
-  <div class="row g-3 mb-4">
-    <div class="col-md-4">
-      <div class="p-3 mf-kanban-col">
-        <h2 class="d-flex justify-content-between align-items-center">
-          <span>🆕 Nouvelles</span>
-          <span class="mf-kanban-count" id="count-nouvelle">{{ columns.nouvelle|length }}</span>
-        </h2>
-        <div id="col-nouvelle">
-          {% for order in columns.nouvelle %}
-            <div class="card mf-order-card-k mb-2" data-order-id="{{ order.id }}">
-              <div class="card-body p-3">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <strong>{{ order.table_label or 'Sans table' }}</strong>
-                  <span class="mf-elapsed">{{ order.elapsed_minutes }} min</span>
-                </div>
-                <ul class="mb-2 ps-3 small">
-                  {% for item in order.items %}<li>{{ item.quantity }} × {{ item.item_name }}</li>{% endfor %}
-                </ul>
-                {% if order.notes %}<p class="mf-order-note mb-2">📝 {{ order.notes }}</p>{% endif %}
-                <p class="fw-bold mb-2" style="color: var(--mf-accent-dark);">{{ "{:,}".format(order.total).replace(",", " ") }} {{ restaurant.currency }}</p>
-                <div class="d-flex gap-2">
-                  <button class="btn btn-outline-secondary btn-sm flex-grow-1 mf-advance-btn" data-order-id="{{ order.id }}">Marquer en préparation</button>
-                  <button class="btn btn-outline-danger btn-sm mf-cancel-btn" data-order-id="{{ order.id }}"><i class="bi bi-x-lg"></i></button>
-                </div>
-              </div>
-            </div>
-          {% else %}
-            <p class="text-muted small">Aucune commande.</p>
-          {% endfor %}
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-4">
-      <div class="p-3 mf-kanban-col">
-        <h2 class="d-flex justify-content-between align-items-center">
-          <span>👨‍🍳 En préparation</span>
-          <span class="mf-kanban-count" id="count-en_preparation">{{ columns.en_preparation|length }}</span>
-        </h2>
-        <div id="col-en_preparation">
-          {% for order in columns.en_preparation %}
-            <div class="card mf-order-card-k mb-2" data-order-id="{{ order.id }}">
-              <div class="card-body p-3">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <strong>{{ order.table_label or 'Sans table' }}</strong>
-                  <span class="mf-elapsed">{{ order.elapsed_minutes }} min</span>
-                </div>
-                <ul class="mb-2 ps-3 small">
-                  {% for item in order.items %}<li>{{ item.quantity }} × {{ item.item_name }}</li>{% endfor %}
-                </ul>
-                {% if order.notes %}<p class="mf-order-note mb-2">📝 {{ order.notes }}</p>{% endif %}
-                <p class="fw-bold mb-2" style="color: var(--mf-accent-dark);">{{ "{:,}".format(order.total).replace(",", " ") }} {{ restaurant.currency }}</p>
-                <div class="d-flex gap-2">
-                  <button class="btn btn-outline-secondary btn-sm flex-grow-1 mf-advance-btn" data-order-id="{{ order.id }}">Marquer prête</button>
-                  <button class="btn btn-outline-danger btn-sm mf-cancel-btn" data-order-id="{{ order.id }}"><i class="bi bi-x-lg"></i></button>
-                </div>
-              </div>
-            </div>
-          {% else %}
-            <p class="text-muted small">Aucune commande.</p>
-          {% endfor %}
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-4">
-      <div class="p-3 mf-kanban-col">
-        <h2 class="d-flex justify-content-between align-items-center">
-          <span>✅ Prêtes</span>
-          <span class="mf-kanban-count" id="count-prete">{{ columns.prete|length }}</span>
-        </h2>
-        <div id="col-prete">
-          {% for order in columns.prete %}
-            <div class="card mf-order-card-k mb-2" data-order-id="{{ order.id }}">
-              <div class="card-body p-3">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <strong>{{ order.table_label or 'Sans table' }}</strong>
-                  <span class="mf-elapsed">{{ order.elapsed_minutes }} min</span>
-                </div>
-                <ul class="mb-2 ps-3 small">
-                  {% for item in order.items %}<li>{{ item.quantity }} × {{ item.item_name }}</li>{% endfor %}
-                </ul>
-                {% if order.notes %}<p class="mf-order-note mb-2">📝 {{ order.notes }}</p>{% endif %}
-                <p class="fw-bold mb-2" style="color: var(--mf-accent-dark);">{{ "{:,}".format(order.total).replace(",", " ") }} {{ restaurant.currency }}</p>
-                <div class="d-flex gap-2">
-                  <button class="btn btn-outline-secondary btn-sm flex-grow-1 mf-advance-btn" data-order-id="{{ order.id }}">Marquer servie</button>
-                  <button class="btn btn-outline-danger btn-sm mf-cancel-btn" data-order-id="{{ order.id }}"><i class="bi bi-x-lg"></i></button>
-                </div>
-              </div>
-            </div>
-          {% else %}
-            <p class="text-muted small">Aucune commande.</p>
-          {% endfor %}
-        </div>
+      <button type="button" class="ob-sound is-off" id="ob-sound" aria-live="polite">
+        <i class="bi bi-volume-mute-fill"></i><span>Activer le son</span>
+      </button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="ob-kitchen" title="Plein écran, texte agrandi, écran toujours allumé">
+        <i class="bi bi-arrows-fullscreen me-1"></i><span>Mode cuisine</span>
+      </button>
+      <div class="ob-views" role="tablist" aria-label="Affichage">
+        <button type="button" class="ob-view is-active" data-ob-view="board" role="tab">En cours</button>
+        <button type="button" class="ob-view" data-ob-view="history" role="tab">Historique</button>
       </div>
     </div>
   </div>
 
-  {% if show_all %}
-    <div class="card mf-section-card">
-      <div class="card-body">
-        <h2 class="mf-section-title fs-6 mb-3">Historique</h2>
-        {% if history %}
-          <table class="table align-middle">
-            <thead class="small text-secondary text-uppercase">
-              <tr><th>Table</th><th>Plats</th><th>Total</th><th>Statut</th></tr>
-            </thead>
-            <tbody>
-              {% for order in history %}
-                <tr>
-                  <td>{{ order.table_label or 'Sans table' }}</td>
-                  <td>{% for item in order.items %}{{ item.quantity }}×{{ item.item_name }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
-                  <td class="fw-bold" style="color: var(--mf-accent-dark);">{{ "{:,}".format(order.total).replace(",", " ") }} {{ restaurant.currency }}</td>
-                  <td>
-                    {% if order.status == 'servie' %}
-                      <span class="badge" style="background:#E2F3EA; color: #2E7D5B;">Servie</span>
-                    {% elif order.status == 'annulee' and order.cancelled_by == 'client' %}
-                      <span class="badge" style="background:#F8E0DD; color: #C4453A;">Annulée par le client</span>
-                    {% else %}
-                      <span class="badge" style="background:#F8E0DD; color: #C4453A;">Annulée</span>
-                    {% endif %}
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        {% else %}
-          <p class="text-secondary small mb-0">Aucune commande terminée pour l'instant.</p>
-        {% endif %}
+  {# ------------------------------ Tableau en cours ------------------------------ #}
+  <section id="ob-board-view">
+    <div class="ob-coltabs" role="tablist" aria-label="Colonnes">
+      <button type="button" class="ob-coltab is-active" data-ob-col="nouvelle">Nouvelles <span data-ob-count="nouvelle">0</span></button>
+      <button type="button" class="ob-coltab" data-ob-col="en_preparation">En préparation <span data-ob-count="en_preparation">0</span></button>
+      <button type="button" class="ob-coltab" data-ob-col="prete">Prêtes <span data-ob-count="prete">0</span></button>
+    </div>
+
+    <div class="ob-board" id="ob-board" data-active-col="nouvelle">
+      <div class="ob-col ob-col--nouvelle" data-col="nouvelle">
+        <div class="ob-col-head"><i class="bi bi-bell-fill"></i><span>Nouvelles</span><b data-ob-count="nouvelle">0</b></div>
+        <div class="ob-col-body" id="ob-col-nouvelle"></div>
+      </div>
+      <div class="ob-col ob-col--en_preparation" data-col="en_preparation">
+        <div class="ob-col-head"><i class="bi bi-fire"></i><span>En préparation</span><b data-ob-count="en_preparation">0</b></div>
+        <div class="ob-col-body" id="ob-col-en_preparation"></div>
+      </div>
+      <div class="ob-col ob-col--prete" data-col="prete">
+        <div class="ob-col-head"><i class="bi bi-check2-circle"></i><span>Prêtes à servir</span><b data-ob-count="prete">0</b></div>
+        <div class="ob-col-body" id="ob-col-prete"></div>
       </div>
     </div>
-  {% endif %}
-  </div>
+
+    <div class="ob-empty d-none" id="ob-empty">
+      <i class="bi bi-cup-hot"></i>
+      <h2 class="h5 fw-bold mt-2 mb-1">Tout est à jour</h2>
+      <p class="mb-0">Les nouvelles commandes apparaîtront ici automatiquement, avec un signal sonore.</p>
+    </div>
+  </section>
+
+  {# --------------------------------- Historique --------------------------------- #}
+  <section id="ob-history-view" class="d-none">
+    <div class="ob-history-bar">
+      <div class="ob-chips" role="group" aria-label="Filtrer l'historique">
+        <button type="button" class="ob-chip is-active" data-ob-filter="today">Aujourd'hui</button>
+        <button type="button" class="ob-chip" data-ob-filter="servie">Servies</button>
+        <button type="button" class="ob-chip" data-ob-filter="annulee">Annulées</button>
+        <button type="button" class="ob-chip" data-ob-filter="all">Tout</button>
+      </div>
+      <span class="small text-secondary" id="ob-history-count"></span>
+    </div>
+    <div class="ob-history" id="ob-history" aria-live="polite"></div>
+    <div class="ob-pager d-none" id="ob-pager">
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="ob-prev"><i class="bi bi-chevron-left"></i> Précédentes</button>
+      <span class="small text-secondary" id="ob-page"></span>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="ob-next">Suivantes <i class="bi bi-chevron-right"></i></button>
+    </div>
+  </section>
+
+  <noscript><div class="alert alert-warning mt-3">JavaScript est nécessaire pour afficher les commandes en direct.</div></noscript>
 </div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='orders_board.js') }}?v=1"></script>
 {% endblock %}
 
 
@@ -10826,6 +12444,8 @@ document.addEventListener("DOMContentLoaded", function () {
   <link rel="stylesheet" href="{{ url_for('static', filename='composition.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='file_upload.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='service.css') }}?v=2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='menu_admin.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='menu_public.css') }}?v=1">
 
   <style>
     :root {
@@ -10891,13 +12511,14 @@ document.addEventListener("DOMContentLoaded", function () {
   <script src="{{ url_for('static', filename='responsive.js') }}?v=1"></script>
   {% block extra_scripts %}{% endblock %}
   {% include "_composition.html" %}
-  <script src="{{ url_for('static', filename='composition.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='composition.js') }}?v=2"></script>
   <script src="{{ url_for('static', filename='file_upload.js') }}?v=1"></script>
   {% include "_service.html" %}
   <script src="{{ url_for('static', filename='service.js') }}?v=2"></script>
+  <script src="{{ url_for('static', filename='menu_admin.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='menu_public.js') }}?v=1"></script>
 </body>
 </html>
-
 
 
 ==================== templates\change_password.html ====================
@@ -11416,6 +13037,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
 <script id="mf-i18n-data" type="application/json">{{ translations|tojson }}</script>
 <script id="mf-suggestions-data" type="application/json">{{ item_suggestions|tojson }}</script>
+<script id="mf-popular-data" type="application/json">{{ (popular_ids or [])|tojson }}</script>
 
 <header class="mf-hero">
   <div class="mf-lang-toggle" role="group" aria-label="Choisir la langue / Choose language">
@@ -11464,12 +13086,26 @@ document.addEventListener("DOMContentLoaded", function () {
   <input type="hidden" name="qr_id" value="{{ request.args.get('qr', '') }}">
 
   <main class="container" style="max-width: 680px; padding-bottom: 110px;">
+    {% if categories %}
+      <div class="mf-pub-search" role="search">
+        <i class="bi bi-search" aria-hidden="true"></i>
+        <input type="search" id="mf-pub-search" class="form-control" maxlength="60" autocomplete="off"
+               enterkeyhint="search" placeholder="Rechercher un plat…" aria-label="Rechercher un plat">
+        <button type="button" class="mf-pub-search-clear d-none" aria-label="Effacer la recherche"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <section id="mf-popular" class="mf-popular d-none" aria-labelledby="mf-popular-title">
+        <h2 class="mf-category-title fs-5" id="mf-popular-title"><i class="bi bi-fire me-1"></i><span>Les plus commandés</span></h2>
+        <div class="mf-popular-track" id="mf-popular-track"></div>
+      </section>
+      <p class="mf-pub-noresult d-none" id="mf-pub-noresult" role="status"></p>
+    {% endif %}
     {% for category in categories %}
-      <section id="cat-{{ category.id }}" class="pt-2" style="scroll-margin-top: 80px;">
+      <section id="cat-{{ category.id }}" class="pt-2 mf-menu-section" style="scroll-margin-top: 80px;">
         <h2 class="mf-category-title fs-5">{{ category.name }}</h2>
 
         {% for item in category.items if item.is_available %}
-          <div class="card mf-item-card hover-lift mb-3">
+          <div class="card mf-item-card hover-lift mb-3" data-mf-item="{{ item.id }}"
+               data-search="{{ item.name }} {{ item.description or '' }}">
             <div class="card-body d-flex align-items-center gap-3 flex-wrap">
               {% if item.photo_url %}
                 <img src="{{ item.photo_url }}" alt="{{ item.name }}" class="mf-item-img" loading="lazy">

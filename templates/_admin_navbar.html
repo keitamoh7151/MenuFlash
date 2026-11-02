@@ -96,6 +96,8 @@
               <i class="bi bi-person-circle me-1"></i>Compte
             </button>
             <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+              <li><a class="dropdown-item" href="{{ url_for('account_devices') }}">
+                <i class="bi bi-laptop me-2"></i>Appareils connectés</a></li>
               <li><a class="dropdown-item" href="{{ url_for('admin_security_log') }}">
                 <i class="bi bi-shield-lock me-2"></i>Journal de sécurité</a></li>
               <li><a class="dropdown-item" href="{{ url_for('change_password') }}">
@@ -116,6 +118,9 @@
             <span class="mf-live-dot"></span> En direct
           </span>
         {% endif %}
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('account_devices') }}" title="Appareils connectés">
+          <i class="bi bi-laptop"></i><span class="d-none d-sm-inline ms-1">Appareils</span>
+        </a>
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('change_password') }}">
           <i class="bi bi-key me-1"></i>Mot de passe
         </a>
@@ -129,4 +134,3 @@
 {% endif %}
 {% include "_new_restaurant_modal.html" %}
 {% include "_platform_announcements.html" %}
-

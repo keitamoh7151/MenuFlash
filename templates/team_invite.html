@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Rejoindre l'équipe — MenuFlash Mini{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card p-2" style="max-width: 440px;">
+    <div class="card-body p-4">
+      {% if state == 'form' %}
+        <div class="text-center mb-4">
+          <i class="bi bi-people-fill" style="font-size: 1.8rem; color: var(--mf-accent);"></i>
+          <h1 class="h5 fw-bold mt-2 mb-1">Bienvenue{{ (' ' ~ name) if name }} !</h1>
+          <p class="text-secondary small mb-0">Choisissez votre mot de passe pour rejoindre l'équipe de <strong>{{ restaurant_name }}</strong>.</p>
+        </div>
+        <form method="post" data-mf-guard autocomplete="on">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="mb-3">
+            <label for="invite-email" class="form-label small fw-semibold">Email de connexion</label>
+            <input type="email" id="invite-email" class="form-control" value="{{ email }}" autocomplete="username" readonly>
+          </div>
+          <div class="mb-3">
+            <label for="invite-password" class="form-label small fw-semibold">Mot de passe</label>
+            <input type="password" id="invite-password" name="password" class="form-control"
+                   data-mf-password="new" autocomplete="new-password"
+                   minlength="{{ PASSWORD_MIN_LENGTH }}" maxlength="{{ PASSWORD_MAX_LENGTH }}" required autofocus>
+          </div>
+          <div class="mb-4">
+            <label for="invite-password-confirm" class="form-label small fw-semibold">Confirmer le mot de passe</label>
+            <input type="password" id="invite-password-confirm" name="password_confirm" class="form-control"
+                   data-mf-password="current" data-mf-confirm="invite-password" autocomplete="new-password"
+                   maxlength="{{ PASSWORD_MAX_LENGTH }}" required>
+          </div>
+          <button type="submit" class="btn btn-primary w-100 py-2">Activer mon compte</button>
+        </form>
+      {% else %}
+        <div class="text-center">
+          <i class="bi bi-x-octagon" style="font-size: 2.2rem; color: var(--mf-danger);"></i>
+          <h1 class="h5 fw-bold mt-2 mb-2">Invitation invalide ou expirée</h1>
+          <p class="small text-secondary mb-3">Ce lien a déjà été utilisé, a expiré (72 heures), ou le compte a été désactivé. Demandez une nouvelle invitation à votre responsable.</p>
+          <a href="{{ url_for('admin_login') }}" class="btn btn-outline-secondary btn-sm">Aller à la connexion</a>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
