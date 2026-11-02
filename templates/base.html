@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='super_admin.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='responsive.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='composition.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='file_upload.css') }}?v=1">
 
   <style>
     :root {
@@ -83,6 +84,7 @@
   {% block extra_scripts %}{% endblock %}
   {% include "_composition.html" %}
   <script src="{{ url_for('static', filename='composition.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='file_upload.js') }}?v=1"></script>
 </body>
 </html>
 
