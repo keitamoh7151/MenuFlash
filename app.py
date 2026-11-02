@@ -1992,6 +1992,11 @@ init_composition(app, owner_required=owner_required,
                  active_restaurant=active_restaurant,
                  log_menu_change=log_menu_change)
 
+from service import init_service
+init_service(app, owner_required=owner_required,
+             active_restaurant=active_restaurant,
+             limiter=limiter, log_menu_change=log_menu_change)
+
 from backups import init_backups
 init_backups(app, log_audit=log_audit, super_admin_required=super_admin_required)
 

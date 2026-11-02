@@ -1,0 +1,4 @@
+{# Service en salle (horaires + appel du serveur) — inclus UNE fois dans base.html, avant </body>. #}
+{% if mf_service %}
+<script id="mf-service-data" type="application/json">{{ mf_service|tojson }}</script>
+{% endif %}

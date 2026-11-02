@@ -1,0 +1,83 @@
+/* ==========================================================================
+   MenuFlash Mini — horaires d'ouverture + appel du serveur
+   ========================================================================== */
+
+/* ---------- Menu public : bandeau « Fermé » ---------- */
+.mf-closed-banner {
+  max-width: 680px; margin: 12px auto 0; padding: 12px 16px;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--mf-danger-bg, #F8E0DD); color: var(--mf-danger, #C4453A);
+  border-radius: 14px; font-weight: 600; position: relative; z-index: 16;
+}
+.mf-closed-banner i { font-size: 1.4rem; flex-shrink: 0; }
+.mf-closed-banner small { display: block; font-weight: 500; color: var(--mf-ink, #1A1D23); opacity: .8; }
+body.mf-is-closed .mf-qty-group,
+body.mf-is-closed #cart-bar,
+body.mf-is-closed .mf-addto-btn { display: none !important; }
+
+/* ---------- Menu public : boutons d'appel ---------- */
+.mf-call-bar {
+  max-width: 680px; margin: 12px auto 0; padding: 0 12px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; position: relative; z-index: 16;
+}
+.mf-call-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 11px 10px; border-radius: 14px; border: 1px solid var(--mf-border, #E7E4DD);
+  background: #fff; color: var(--mf-ink, #1A1D23); font-weight: 700; font-size: .9rem;
+  box-shadow: 0 2px 10px rgba(26,29,35,.06); transition: transform .1s ease, background-color .2s ease;
+}
+.mf-call-btn i { font-size: 1.1rem; color: var(--mf-accent-dark, #B5730F); }
+.mf-call-btn:active { transform: scale(.97); }
+.mf-call-btn:disabled { opacity: 1; background: var(--mf-success-bg, #E2F3EA); color: var(--mf-success, #2E7D5B); border-color: transparent; }
+.mf-call-btn:disabled i { color: var(--mf-success, #2E7D5B); }
+.mf-call-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Back-office : panneau des appels ---------- */
+.mf-calls-panel {
+  position: fixed; right: 16px; bottom: 16px; z-index: 1070;
+  width: min(340px, calc(100vw - 32px));
+  background: #fff; border-radius: 16px; overflow: hidden;
+  box-shadow: 0 14px 40px rgba(26,29,35,.28); border: 2px solid var(--mf-accent, #D98E1F);
+  animation: mf-calls-in .25s ease;
+}
+@keyframes mf-calls-in { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+.mf-calls-head {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  background: var(--mf-accent, #D98E1F); color: #fff; font-weight: 700;
+}
+.mf-calls-head .mf-calls-bell { animation: mf-ring 1.2s ease-in-out infinite; transform-origin: top center; }
+@keyframes mf-ring { 0%, 60%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(14deg); } 20%, 40% { transform: rotate(-14deg); } }
+.mf-calls-toggle { margin-left: auto; background: transparent; border: 0; color: #fff; font-size: 1rem; padding: 0 2px; }
+.mf-calls-list { max-height: 50vh; overflow-y: auto; }
+.mf-calls-panel.is-collapsed .mf-calls-list { display: none; }
+.mf-call-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--mf-border, #E7E4DD); }
+.mf-call-item:last-child { border-bottom: 0; }
+.mf-call-icon {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--mf-accent-light, #FBE9CC); color: var(--mf-accent-dark, #B5730F);
+}
+.mf-call-item.is-bill .mf-call-icon { background: var(--mf-success-bg, #E2F3EA); color: var(--mf-success, #2E7D5B); }
+.mf-call-text { flex: 1 1 auto; min-width: 0; line-height: 1.25; }
+.mf-call-text strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mf-call-text small { color: var(--mf-ink-soft, #6B6A66); }
+.mf-call-done { flex-shrink: 0; font-size: .78rem; font-weight: 700; }
+body.mf-is-public .mf-calls-panel { display: none; }
+
+/* ---------- Page Horaires ---------- */
+.mf-hours-grid { display: flex; flex-direction: column; gap: 6px; }
+.mf-hours-row {
+  display: grid; grid-template-columns: 96px 80px 1fr; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 10px; background: var(--mf-bg, #F7F6F3);
+}
+.mf-hours-row.is-closed .mf-hours-slots { opacity: .35; }
+.mf-hours-day { font-weight: 700; }
+.mf-hours-slots { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.mf-hours-slot { display: flex; align-items: center; gap: 6px; }
+.mf-hours-slot input { width: 110px; }
+@media (max-width: 575.98px) {
+  .mf-hours-row { grid-template-columns: 1fr auto; }
+  .mf-hours-slots { grid-column: 1 / -1; }
+  .mf-hours-slot input { width: 100%; min-width: 0; }
+  .mf-hours-slot { flex: 1 1 100%; }
+}
