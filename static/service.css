@@ -2,35 +2,44 @@
    MenuFlash Mini — horaires d'ouverture + appel du serveur
    ========================================================================== */
 
-/* ---------- Menu public : bandeau « Fermé » ---------- */
+/* ---------- Menu public : zone de service, DANS l'en-tête sombre ----------
+   Placée sous le badge de la table : elle ne chevauche plus la barre des
+   catégories (qui remonte de 32 px sur l'en-tête). */
+.mf-hero .mf-service-host { max-width: 440px; margin: 16px auto 0; padding: 0 4px; }
+
+/* Bandeau « Fermé » */
 .mf-closed-banner {
-  max-width: 680px; margin: 12px auto 0; padding: 12px 16px;
-  display: flex; align-items: center; gap: 12px;
-  background: var(--mf-danger-bg, #F8E0DD); color: var(--mf-danger, #C4453A);
-  border-radius: 14px; font-weight: 600; position: relative; z-index: 16;
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 12px 16px; border-radius: 14px;
+  background: rgba(196, 69, 58, .18); border: 1px solid rgba(255, 140, 128, .55);
+  color: #FFD9D4; font-weight: 700;
 }
 .mf-closed-banner i { font-size: 1.4rem; flex-shrink: 0; }
-.mf-closed-banner small { display: block; font-weight: 500; color: var(--mf-ink, #1A1D23); opacity: .8; }
+.mf-closed-banner small { display: block; font-weight: 500; color: #fff; opacity: .85; }
 body.mf-is-closed .mf-qty-group,
 body.mf-is-closed #cart-bar,
 body.mf-is-closed .mf-addto-btn { display: none !important; }
 
-/* ---------- Menu public : boutons d'appel ---------- */
-.mf-call-bar {
-  max-width: 680px; margin: 12px auto 0; padding: 0 12px;
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; position: relative; z-index: 16;
-}
+/* Boutons d'appel : deux pastilles côte à côte, style « verre » sur fond sombre */
+.mf-call-bar { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
 .mf-call-btn {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 11px 10px; border-radius: 14px; border: 1px solid var(--mf-border, #E7E4DD);
-  background: #fff; color: var(--mf-ink, #1A1D23); font-weight: 700; font-size: .9rem;
-  box-shadow: 0 2px 10px rgba(26,29,35,.06); transition: transform .1s ease, background-color .2s ease;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  flex: 1 1 0; min-width: 0; max-width: 210px;
+  padding: 9px 14px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .28); background: rgba(255, 255, 255, .10);
+  color: #fff; font-weight: 600; font-size: .85rem; line-height: 1.2;
+  transition: transform .1s ease, background-color .2s ease, border-color .2s ease;
 }
-.mf-call-btn i { font-size: 1.1rem; color: var(--mf-accent-dark, #B5730F); }
+.mf-call-btn i { font-size: 1rem; color: var(--mf-accent, #D98E1F); flex-shrink: 0; }
+.mf-call-btn:hover { background: rgba(255, 255, 255, .18); border-color: rgba(255, 255, 255, .45); }
 .mf-call-btn:active { transform: scale(.97); }
-.mf-call-btn:disabled { opacity: 1; background: var(--mf-success-bg, #E2F3EA); color: var(--mf-success, #2E7D5B); border-color: transparent; }
-.mf-call-btn:disabled i { color: var(--mf-success, #2E7D5B); }
+.mf-call-btn:focus-visible { outline: 2px solid var(--mf-accent, #D98E1F); outline-offset: 2px; }
+.mf-call-btn:disabled { opacity: 1; background: rgba(46, 125, 91, .35); border-color: rgba(120, 220, 170, .6); }
+.mf-call-btn:disabled i { color: #9BE3BF; }
 .mf-call-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 359.98px) {
+  .mf-call-btn { font-size: .78rem; padding: 8px 10px; gap: 5px; }
+}
 
 /* ---------- Back-office : panneau des appels ---------- */
 .mf-calls-panel {

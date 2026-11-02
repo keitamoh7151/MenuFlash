@@ -12,12 +12,12 @@
 
   var TEXT = {
     fr: { closed: "Fermé actuellement", suspended: "Commandes momentanément suspendues",
-          waiter: "Appeler le serveur", bill: "Demander l'addition",
+          waiter: "Appeler le serveur", bill: "L'addition",
           waiterSent: "Serveur prévenu", billSent: "Addition demandée",
           sentToast: "C'est noté : un serveur arrive à votre table.",
           error: "Impossible d'envoyer la demande. Vérifiez votre connexion." },
     en: { closed: "Closed right now", suspended: "Orders temporarily paused",
-          waiter: "Call the waiter", bill: "Ask for the bill",
+          waiter: "Call the waiter", bill: "The bill",
           waiterSent: "Waiter notified", billSent: "Bill requested",
           sentToast: "Got it: a waiter is coming to your table.",
           error: "Could not send the request. Check your connection." }
@@ -33,15 +33,16 @@
   function initPublic() {
     document.body.classList.add("mf-is-public");
     var hero = document.querySelector(".mf-hero");
-    var anchor = hero ? hero.nextElementSibling : null;
     var host = el("div", "mf-service-host");
-    if (hero) hero.parentNode.insertBefore(host, hero.nextSibling);
+    // Dans l'en-tête, sous le nom du restaurant et le badge de la table.
+    if (hero) hero.appendChild(host);
     else document.body.insertBefore(host, document.body.firstChild);
 
     var buttons = {};
 
     function render() {
       host.textContent = "";
+      buttons = {};
       if (!cfg.open) {
         document.body.classList.add("mf-is-closed");
         var b = el("div", "mf-closed-banner");
@@ -54,7 +55,7 @@
         host.appendChild(b);
         return;
       }
-      if (!cfg.table) return;
+      if (!cfg.table) { host.remove(); return; }
       var bar = el("div", "mf-call-bar");
       [["serveur", "bi-bell-fill", "waiter", "waiterSent"], ["addition", "bi-receipt", "bill", "billSent"]].forEach(function (def) {
         var btn = el("button", "mf-call-btn");
@@ -62,7 +63,6 @@
         btn.appendChild(icon(def[1]));
         var label = el("span", null, t(def[2]));
         btn.appendChild(label);
-        btn.dataset.kind = def[0];
         btn.addEventListener("click", function () { send(btn, label, def); });
         buttons[def[0]] = { btn: btn, label: label, def: def };
         bar.appendChild(btn);
@@ -104,8 +104,7 @@
         setTimeout(function () {
           Object.keys(buttons).forEach(function (k) {
             var o = buttons[k];
-            if (!o.btn.disabled) o.label.textContent = t(o.def[2]);
-            else o.label.textContent = t(o.def[3]);
+            o.label.textContent = t(o.btn.disabled ? o.def[3] : o.def[2]);
           });
           if (!cfg.open) render();
         }, 0);
@@ -128,7 +127,7 @@
         o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.18);
       });
       setTimeout(function () { ctx.close(); }, 1000);
-    } catch (e) { /* son bloqué par le navigateur tant qu'on n'a pas cliqué dans la page */ }
+    } catch (e) { /* son bloqué tant qu'on n'a pas cliqué dans la page */ }
   }
 
   function initStaff() {
@@ -143,7 +142,6 @@
       panel.setAttribute("role", "region");
       panel.setAttribute("aria-label", "Appels des clients");
       var head = el("div", "mf-calls-head");
-      var bell = icon("bi-bell-fill mf-calls-bell");
       countEl = el("span");
       var toggle = el("button", "mf-calls-toggle");
       toggle.type = "button";
@@ -153,7 +151,7 @@
         panel.classList.toggle("is-collapsed");
         toggle.firstChild.className = "bi " + (panel.classList.contains("is-collapsed") ? "bi-chevron-up" : "bi-chevron-down");
       });
-      head.appendChild(bell); head.appendChild(countEl); head.appendChild(toggle);
+      head.appendChild(icon("bi-bell-fill mf-calls-bell")); head.appendChild(countEl); head.appendChild(toggle);
       list = el("div", "mf-calls-list");
       list.setAttribute("aria-live", "polite");
       panel.appendChild(head); panel.appendChild(list);
