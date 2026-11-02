@@ -73,8 +73,12 @@
           {% for row in rows %}{% set r = row.r %}
             <tr>
               <td><a class="fw-semibold" href="{{ url_for('super_admin_restaurant_detail', restaurant_id=r.id) }}">{{ r.name }}</a>
-                <div class="small text-secondary">/m/{{ r.slug }}</div></td>
-              <td class="small">{{ row.owner.email if row.owner else '—' }}</td>
+                {% set rpf = (mf_restaurant_profiles or {}).get(r.id) %}
+                <div class="small text-secondary">/m/{{ r.slug }}{% if rpf and rpf.city %} · {{ rpf.city }}{% endif %}</div></td>
+              {% set opf = (mf_user_profiles or {}).get(row.owner.id) if row.owner else None %}
+              <td class="small">{% if opf and opf.full_name %}<div class="fw-semibold">{{ opf.full_name }}</div>{% endif %}
+                {{ row.owner.email if row.owner else '—' }}
+                {% if opf and opf.phone %}<div><a href="https://wa.me/{{ opf.phone|wa_number }}" target="_blank" rel="noopener"><i class="bi bi-whatsapp"></i> {{ opf.phone }}</a></div>{% endif %}</td>
               <td class="small">{{ plan_labels.get(r.subscription_plan, r.subscription_plan) }}</td>
               <td><span class="badge {{ status_labels[row.status][1] }}">{{ status_labels[row.status][0] }}</span></td>
               <td class="small">{{ r.subscription_active_until.strftime('%d/%m/%Y') if r.subscription_active_until else '—' }}</td>

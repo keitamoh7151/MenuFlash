@@ -74,6 +74,7 @@
               <li><a class="dropdown-item" href="{{ url_for('admin_appearance') }}">
                 <i class="bi bi-palette me-2"></i>Apparence &amp; logo</a></li>
               <li><a class="dropdown-item" href="{{ url_for('admin_hours') }}"><i class="bi bi-clock me-2"></i>Horaires d'ouverture</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_profile') }}"><i class="bi bi-person-vcard me-2"></i>Profil du restaurant</a></li>
             </ul>
           </li>
 
@@ -134,3 +135,4 @@
 {% endif %}
 {% include "_new_restaurant_modal.html" %}
 {% include "_platform_announcements.html" %}
+{% if request.endpoint == 'admin_dashboard' %}{% include "_profile_checklist.html" %}{% endif %}

@@ -2055,6 +2055,10 @@ from security_plus import init_security_plus
 init_security_plus(app, limiter=limiter, log_audit=log_audit,
                    owner_required=owner_required, active_restaurant=active_restaurant)
 
+from profiles import init_profiles
+init_profiles(app, owner_required=owner_required, active_restaurant=active_restaurant,
+              log_menu_change=log_menu_change)
+
 
 if __name__ == "__main__":
     with app.app_context():

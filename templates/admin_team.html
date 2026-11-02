@@ -21,6 +21,12 @@
         <input type="text" class="form-control" value="{{ last_invite.link }}" readonly id="mf-invite-link" aria-label="Lien d'invitation">
         <button class="btn btn-outline-secondary mf-copy-btn" type="button" data-copy-text="{{ last_invite.link }}"><i class="bi bi-clipboard me-1"></i>Copier</button>
       </div>
+      {% if last_invite.phone and last_invite.phone|wa_number %}
+        {% set wa_text = 'Bonjour ' ~ (last_invite.name or '') ~ ', voici votre invitation à rejoindre l\'équipe de ' ~ (last_invite.restaurant or 'notre restaurant') ~ ' sur MenuFlash Mini : ' ~ last_invite.link %}
+        <a class="btn btn-success btn-sm mt-2" target="_blank" rel="noopener"
+           href="https://wa.me/{{ last_invite.phone|wa_number }}?text={{ wa_text|urlencode }}">
+          <i class="bi bi-whatsapp me-1"></i>Envoyer par WhatsApp à {{ last_invite.phone }}</a>
+      {% endif %}
     </div></div>
   {% endif %}
 
@@ -29,11 +35,25 @@
     <p class="small text-secondary">L'employé reçoit un email pour choisir <strong>lui-même</strong> son mot de passe. Vous ne le connaissez jamais.</p>
     <form method="post" action="{{ url_for('admin_team_add') }}" class="row g-2 align-items-end" data-mf-guard data-mf-sudo autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="col-md-4">
-        <label for="staff-name" class="form-label small">Nom (optionnel)</label>
-        <input type="text" id="staff-name" name="name_note" class="form-control" maxlength="80" autocomplete="off" placeholder="Ex : Fatou">
+      <div class="col-6 col-md-3">
+        <label for="staff-first" class="form-label small">Prénom</label>
+        <input type="text" id="staff-first" name="first_name" class="form-control" minlength="2" maxlength="50" autocomplete="off" placeholder="Ex : Fatou" required>
       </div>
-      <div class="col-md-5">
+      <div class="col-6 col-md-3">
+        <label for="staff-last" class="form-label small">Nom <span class="text-secondary">(optionnel)</span></label>
+        <input type="text" id="staff-last" name="last_name" class="form-control" maxlength="50" autocomplete="off">
+      </div>
+      <div class="col-6 col-md-3">
+        <label for="staff-job" class="form-label small">Poste</label>
+        <select id="staff-job" name="job" class="form-select" required>
+          {% for key, label in mf_jobs.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3">
+        <label for="staff-phone" class="form-label small">Téléphone <span class="text-secondary">(optionnel)</span></label>
+        <input type="tel" id="staff-phone" name="phone" class="form-control" maxlength="30" inputmode="tel" pattern="[0-9+\-() ]*" placeholder="Pour WhatsApp">
+      </div>
+      <div class="col-md-9">
         <label for="staff-email" class="form-label small">Email de l'employé</label>
         <input type="email" id="staff-email" name="email" class="form-control" maxlength="120"
                autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email" required>
@@ -52,13 +72,16 @@
         <div class="mf-team-row {{ 'is-disabled' if row.status == 'disabled' }}">
           <div class="mf-team-avatar"><i class="bi bi-person"></i></div>
           <div class="mf-team-main">
-            <div class="fw-semibold text-break">{{ row.name or u.email }}
+            {% set sp = (mf_staff_profiles or {}).get(u.id) %}
+            <div class="fw-semibold text-break">{{ (sp.full_name if sp and sp.full_name) or row.name or u.email }}
+              {% if sp and sp.job %}<span class="badge mf-sa-badge-info">{{ mf_jobs.get(sp.job, sp.job) }}</span>{% endif %}
               {% if row.status == 'active' %}<span class="badge mf-sa-badge-ok">Actif</span>
               {% elif row.status == 'pending' %}<span class="badge mf-sa-badge-warning">Invitation en attente</span>
               {% else %}<span class="badge mf-sa-badge-muted">Désactivé</span>{% endif %}
             </div>
             <div class="small text-secondary text-break">
-              {% if row.name %}{{ u.email }} · {% endif %}
+              {% if (sp and sp.full_name) or row.name %}{{ u.email }} · {% endif %}
+              {% if sp and sp.phone %}<a href="https://wa.me/{{ sp.phone|wa_number }}" target="_blank" rel="noopener" class="text-secondary"><i class="bi bi-whatsapp"></i> {{ sp.phone }}</a> · {% endif %}
               {% if row.status == 'pending' %}invité le {{ row.invited }}
               {% elif row.last_login %}dernière connexion le {{ row.last_login }}
               {% else %}jamais connecté{% endif %}

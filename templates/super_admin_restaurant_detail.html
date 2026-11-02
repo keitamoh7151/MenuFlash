@@ -19,6 +19,19 @@
     <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('super_admin_clients') }}"><i class="bi bi-arrow-left me-1"></i>Tous les clients</a>
   </div>
 
+  {% set rpf = (mf_restaurant_profiles or {}).get(r.id) %}
+  {% set opf = (mf_user_profiles or {}).get(owners[0].id) if owners else None %}
+  {% if rpf or opf %}
+    <div class="card mf-section-card mb-3"><div class="card-body d-flex flex-wrap gap-4 small">
+      {% if opf and opf.full_name %}<div><div class="text-secondary">Gestionnaire</div><strong>{{ opf.full_name }}</strong></div>{% endif %}
+      {% if opf and opf.phone %}<div><div class="text-secondary">WhatsApp</div><a href="https://wa.me/{{ opf.phone|wa_number }}" target="_blank" rel="noopener"><i class="bi bi-whatsapp me-1"></i>{{ opf.phone }}</a></div>{% endif %}
+      {% if rpf and (rpf.city or rpf.district) %}<div><div class="text-secondary">Lieu</div><strong>{{ [rpf.district, rpf.city]|select|join(', ') }}</strong></div>{% endif %}
+      {% if rpf and rpf.address %}<div><div class="text-secondary">Adresse</div>{{ rpf.address }}</div>{% endif %}
+      {% if rpf and rpf.cuisine %}<div><div class="text-secondary">Cuisine</div>{{ rpf.cuisine }}</div>{% endif %}
+      {% if rpf and rpf.table_count is not none %}<div><div class="text-secondary">Tables</div>{{ rpf.table_count }}</div>{% endif %}
+    </div></div>
+  {% endif %}
+
   {% if meta and meta.suspension_reason and not r.is_active %}
     <div class="alert alert-warning small"><i class="bi bi-pause-circle-fill me-1"></i>
       <strong>{{ 'Archivé' if meta.archived_at else 'Suspendu' }}</strong>
@@ -65,8 +78,9 @@
           <tbody>
           {% for u in users %}
             <tr class="small">
-              <td>{{ u.email }}{% if not u.email_verified %} <span class="badge mf-sa-badge-muted">non vérifié</span>{% endif %}</td>
-              <td>{{ 'Gestionnaire' if u.role == 'owner' else 'Cuisinier' }}</td>
+                {% set upf = (mf_user_profiles or {}).get(u.id) %}
+                <td>{% if upf and upf.full_name %}<strong>{{ upf.full_name }}</strong><br>{% endif %}{{ u.email }}{% if not u.email_verified %} <span class="badge mf-sa-badge-muted">non vérifié</span>{% endif %}</td>
+                <td>{{ 'Gestionnaire' if u.role == 'owner' else (mf_jobs.get(upf.job) if upf and upf.job else 'Équipe') }}</td>
               <td class="text-secondary">{{ u.last_login_at.strftime('%d/%m/%Y %H:%M') if u.last_login_at else 'jamais' }}</td>
               <td>{% if u.is_locked %}<span class="badge mf-sa-badge-danger">Verrouillé</span>{% elif u.failed_login_attempts %}<span class="badge mf-sa-badge-warning">{{ u.failed_login_attempts }} échec(s)</span>{% else %}<span class="badge mf-sa-badge-ok">OK</span>{% endif %}</td>
             </tr>

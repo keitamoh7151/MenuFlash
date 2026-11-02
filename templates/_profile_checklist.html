@@ -1,0 +1,45 @@
+{# Liste « Complétez votre profil » — tableau de bord du gestionnaire uniquement. #}
+{% if mf_checklist and mf_checklist.done < mf_checklist.total %}
+<div class="container pt-3" style="max-width: 1080px;">
+  <div class="card mf-section-card mf-checklist" id="mf-checklist" data-done="{{ mf_checklist.done }}">
+    <div class="card-body py-3">
+      <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+        <i class="bi bi-stars" style="color: var(--mf-accent);"></i>
+        <strong>Complétez votre profil</strong>
+        <span class="small text-secondary">{{ mf_checklist.done }} / {{ mf_checklist.total }}</span>
+        <button type="button" class="btn-close ms-auto" aria-label="Masquer" id="mf-checklist-close"></button>
+      </div>
+      <div class="progress mb-2" style="height: 6px;" role="progressbar" aria-valuenow="{{ mf_checklist.done }}" aria-valuemin="0" aria-valuemax="{{ mf_checklist.total }}">
+        <div class="progress-bar" style="width: {{ (100 * mf_checklist.done / mf_checklist.total)|round|int }}%; background: var(--mf-accent);"></div>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        {% for label, done, link in mf_checklist['items'] %}
+          {% if done %}
+            <span class="mf-ck mf-ck-done"><i class="bi bi-check-circle-fill"></i>{{ label }}</span>
+          {% else %}
+            <a class="mf-ck" href="{{ link }}"><i class="bi bi-circle"></i>{{ label }}</a>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+  .mf-ck { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+           border: 1px dashed var(--mf-border); color: var(--mf-ink); text-decoration: none; background: #fff; }
+  .mf-ck:hover { border-color: var(--mf-accent); color: var(--mf-accent-dark); }
+  .mf-ck-done { border-style: solid; border-color: transparent; background: var(--mf-success-bg); color: var(--mf-success); }
+</style>
+<script>
+(function () {
+  var box = document.getElementById("mf-checklist");
+  if (!box) return;
+  var key = "mf_checklist_hidden";
+  try { if (localStorage.getItem(key) === box.dataset.done) { box.parentNode.remove(); return; } } catch (e) {}
+  document.getElementById("mf-checklist-close").addEventListener("click", function () {
+    try { localStorage.setItem(key, box.dataset.done); } catch (e) {}
+    box.parentNode.remove();
+  });
+})();
+</script>
+{% endif %}
