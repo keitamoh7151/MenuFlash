@@ -76,7 +76,7 @@ from models import (db, Restaurant, User, MenuCategory, MenuItem, QRCode,
                      THEME_PRESETS, DEFAULT_THEME, DEFAULT_PREP_MINUTES,
                      TRIAL_DAYS, MAX_FAILED_LOGIN_ATTEMPTS, LOCKOUT_DURATION_MINUTES)
 from pdf_utils import make_table_tent_pdf
-from stats_utils import build_dashboard_stats
+from stats_utils import build_dashboard_stats, top_selling_items
 from i18n import TRANSLATIONS
 import realtime
 from mailer import init_mailer, send_transactional_email
@@ -973,8 +973,38 @@ def public_menu(slug):
         table_label=table_label,
         ratings=ratings,
         item_suggestions=item_suggestions,
+        popular_ids=_popular_item_ids(restaurant.id, categories),
         translations=TRANSLATIONS,
     )
+
+
+POPULAR_MIN_ITEMS = 3      # en dessous, la section « Les plus commandés » n'est pas affichée
+POPULAR_MAX_ITEMS = 6
+
+
+def _popular_item_ids(restaurant_id, categories):
+    """
+    Plats les plus commandés sur 30 jours, parmi ceux actuellement visibles
+    et disponibles sur le menu public (catégorie non en pause). Renvoie une
+    liste vide s'il n'y a pas assez d'historique : on n'affiche jamais une
+    section « populaire » artificielle.
+    """
+    try:
+        visible = {}
+        for category in categories:
+            for item in category.items:
+                if item.is_available:
+                    visible.setdefault(item.name, item.id)
+        ids = []
+        for row in top_selling_items(restaurant_id, days=30, limit=POPULAR_MAX_ITEMS * 2):
+            item_id = visible.get(row["name"])
+            if item_id and item_id not in ids:
+                ids.append(item_id)
+        ids = ids[:POPULAR_MAX_ITEMS]
+        return ids if len(ids) >= POPULAR_MIN_ITEMS else []
+    except Exception:
+        db.session.rollback()
+        return []
 
 
 def _build_qr_target_url(restaurant, qr=None, table_label=None):
@@ -1590,6 +1620,8 @@ def toggle_item(item_id):
     log_menu_change(restaurant_id, current_user, "item_toggled",
                      f"Plat « {item.name} » marqué {state}.")
     db.session.commit()
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify({"ok": True, "is_available": item.is_available})
     return redirect(url_for("admin_dashboard"))
 
 
@@ -2021,5 +2053,3 @@ if __name__ == "__main__":
         _ensure_schema_migrations()
         _ensure_security_defaults()
     app.run(debug=True, port=5000, host="0.0.0.0", threaded=True)
-
-

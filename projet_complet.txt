@@ -1,4 +1,4 @@
-﻿
+
 ==================== app.py ====================
 """
 MenuFlash Mini — point d'entrée Flask
@@ -1989,6 +1989,16 @@ def _ensure_security_defaults():
     except Exception:
         db.session.rollback()
 
+from composition import init_composition
+init_composition(app, owner_required=owner_required,
+                 active_restaurant=active_restaurant,
+                 log_menu_change=log_menu_change)
+
+from service import init_service
+init_service(app, owner_required=owner_required,
+             active_restaurant=active_restaurant,
+             limiter=limiter, log_menu_change=log_menu_change)
+
 from backups import init_backups
 init_backups(app, log_audit=log_audit, super_admin_required=super_admin_required)
 
@@ -2003,6 +2013,9 @@ init_super_admin(
     min_password_length=MIN_PASSWORD_LENGTH,
 )
 
+from two_factor import init_two_factor
+init_two_factor(app, log_audit=log_audit, limiter=limiter)
+
 
 if __name__ == "__main__":
     with app.app_context():
@@ -2010,6 +2023,7 @@ if __name__ == "__main__":
         _ensure_schema_migrations()
         _ensure_security_defaults()
     app.run(debug=True, port=5000, host="0.0.0.0", threaded=True)
+
 
 
 
@@ -2811,6 +2825,259 @@ def init_backups(app, *, log_audit, super_admin_required):
     @super_admin_required
     def super_admin_backup_restore_file():
         return _handle("test" if request.form.get("test_only") else "restore")
+
+
+==================== composition.py ====================
+"""
+MenuFlash Mini — Composition des plats (ingrédients, allergènes, régimes).
+
+Branchement dans app.py, JUSTE APRÈS la définition de `owner_required`
+(n'importe où après, par exemple juste avant `from backups import init_backups`) :
+
+    from composition import init_composition
+    init_composition(app, owner_required=owner_required,
+                     active_restaurant=active_restaurant,
+                     log_menu_change=log_menu_change)
+
+Ce que fait le module
+---------------------
+- Le restaurateur renseigne, pour chaque plat, la liste des ingrédients,
+  les allergènes présents (liste fermée) et des mentions (végétarien,
+  halal, épicé…), depuis un bouton « Composition » ajouté à côté du
+  crayon de chaque plat dans le tableau de bord.
+- Le client voit cette composition sous chaque plat du menu public, en
+  français ou en anglais selon la langue choisie.
+
+Sécurité
+--------
+- Écriture réservée au gestionnaire (owner_required), CSRF obligatoire,
+  et le plat doit appartenir au restaurant actif (isolation stricte).
+- Ingrédients : 30 au maximum, 60 caractères chacun, caractères autorisés
+  limités (lettres, chiffres, espaces et ' ’ - . ( ) / % &), doublons
+  supprimés. Tout le reste est refusé avec un message clair.
+- Allergènes et mentions : uniquement des valeurs d'une liste fermée.
+- Affichage : données passées en JSON échappé (|tojson) et insérées dans
+  la page uniquement via textContent : aucune injection HTML possible.
+- Chaque modification est tracée dans l'historique du menu.
+- Les compositions sont automatiquement incluses dans les sauvegardes et
+  supprimées avec le plat.
+"""
+import json
+import re
+import unicodedata
+from datetime import datetime
+
+from flask import request, redirect, url_for, flash, abort
+from flask_login import current_user
+from sqlalchemy import event
+
+from models import db, MenuItem, Restaurant
+
+MAX_INGREDIENTS = 30
+MAX_INGREDIENT_LEN = 60
+_ALLOWED_CHARS = re.compile(r"^[\w\s'’\-.()/%&]+$", re.UNICODE)
+
+# Les 14 allergènes réglementaires (+ libellés FR/EN). Liste FERMÉE.
+ALLERGENS = {
+    "gluten":      ("Gluten", "Gluten"),
+    "crustaces":   ("Crustacés", "Crustaceans"),
+    "oeufs":       ("Œufs", "Eggs"),
+    "poisson":     ("Poisson", "Fish"),
+    "arachides":   ("Arachides", "Peanuts"),
+    "soja":        ("Soja", "Soy"),
+    "lait":        ("Lait", "Milk"),
+    "fruits_coque": ("Fruits à coque", "Tree nuts"),
+    "celeri":      ("Céleri", "Celery"),
+    "moutarde":    ("Moutarde", "Mustard"),
+    "sesame":      ("Sésame", "Sesame"),
+    "sulfites":    ("Sulfites", "Sulphites"),
+    "lupin":       ("Lupin", "Lupin"),
+    "mollusques":  ("Mollusques", "Molluscs"),
+}
+
+# Mentions affichées en vert. Liste FERMÉE.
+TAGS = {
+    "vegetarien":  ("Végétarien", "Vegetarian"),
+    "vegan":       ("Végan", "Vegan"),
+    "sans_gluten": ("Sans gluten", "Gluten-free"),
+    "halal":       ("Halal", "Halal"),
+    "epice":       ("Épicé", "Spicy"),
+    "fait_maison": ("Fait maison", "Homemade"),
+}
+
+LABELS = {
+    "fr": {"composition": "Composition", "contains": "Contient", "allergens_none": ""},
+    "en": {"composition": "Ingredients", "contains": "Contains", "allergens_none": ""},
+}
+
+
+class CompositionError(ValueError):
+    """Erreur de saisie, avec un message lisible par le restaurateur."""
+
+
+# ==========================================================================
+# Modèle (nouvelle table, aucune table existante n'est modifiée)
+# ==========================================================================
+class MenuItemComposition(db.Model):
+    __tablename__ = "menu_item_compositions"
+    menu_item_id = db.Column(db.Integer, db.ForeignKey("menu_items.id"), primary_key=True)
+    restaurant_id = db.Column(db.Integer, db.ForeignKey("restaurants.id"), nullable=False, index=True)
+    ingredients = db.Column(db.Text, nullable=False, default="[]")      # JSON : liste de textes
+    allergens = db.Column(db.String(300), nullable=False, default="[]")  # JSON : clés de ALLERGENS
+    tags = db.Column(db.String(200), nullable=False, default="[]")       # JSON : clés de TAGS
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def as_dict(self):
+        return {
+            "ingredients": _loads(self.ingredients),
+            "allergens": [a for a in _loads(self.allergens) if a in ALLERGENS],
+            "tags": [t for t in _loads(self.tags) if t in TAGS],
+        }
+
+    @property
+    def is_empty(self):
+        d = self.as_dict()
+        return not (d["ingredients"] or d["allergens"] or d["tags"])
+
+
+def _loads(raw):
+    try:
+        value = json.loads(raw or "[]")
+        return [str(v) for v in value] if isinstance(value, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+# ==========================================================================
+# Validation
+# ==========================================================================
+def clean_ingredients(raw):
+    """Découpe la saisie (une ligne ou une virgule par ingrédient) et la valide."""
+    raw = unicodedata.normalize("NFC", raw or "")
+    parts = re.split(r"[\n\r,;]+", raw)
+    result, seen = [], set()
+    for part in parts:
+        text = re.sub(r"\s+", " ", part).strip(" .-")
+        if not text:
+            continue
+        if len(text) > MAX_INGREDIENT_LEN:
+            raise CompositionError(f"« {text[:25]}… » est trop long ({MAX_INGREDIENT_LEN} caractères maximum).")
+        if not _ALLOWED_CHARS.match(text) or any(ord(ch) < 32 for ch in text):
+            raise CompositionError(f"« {text[:30]} » contient des caractères non autorisés.")
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(text)
+    if len(result) > MAX_INGREDIENTS:
+        raise CompositionError(f"{MAX_INGREDIENTS} ingrédients au maximum.")
+    return result
+
+
+def clean_choices(values, allowed):
+    """Ne garde que les valeurs de la liste fermée, sans doublon, dans l'ordre de la liste."""
+    chosen = {v for v in values if v in allowed}
+    return [k for k in allowed if k in chosen]
+
+
+def compositions_for_restaurant(restaurant_id):
+    """{menu_item_id: {"ingredients": [...], "allergens": [...], "tags": [...]}}"""
+    rows = MenuItemComposition.query.filter_by(restaurant_id=restaurant_id).all()
+    return {r.menu_item_id: r.as_dict() for r in rows if not r.is_empty}
+
+
+def _label_dict():
+    return {
+        "allergens": {k: {"fr": v[0], "en": v[1]} for k, v in ALLERGENS.items()},
+        "tags": {k: {"fr": v[0], "en": v[1]} for k, v in TAGS.items()},
+        "ui": LABELS,
+    }
+
+
+# ==========================================================================
+# Branchement
+# ==========================================================================
+def init_composition(app, *, owner_required, active_restaurant, log_menu_change):
+
+    with app.app_context():
+        MenuItemComposition.__table__.create(db.engine, checkfirst=True)
+
+    @event.listens_for(MenuItem, "after_delete")
+    def _delete_composition(mapper, connection, target):
+        connection.execute(MenuItemComposition.__table__.delete().where(
+            MenuItemComposition.__table__.c.menu_item_id == target.id))
+
+    @app.route("/admin/items/<int:item_id>/composition", methods=["POST"])
+    @owner_required
+    def edit_item_composition(item_id):
+        restaurant = active_restaurant()
+        if restaurant is None:
+            abort(403)
+        item = MenuItem.query.filter_by(id=item_id, restaurant_id=restaurant.id).first_or_404()
+
+        try:
+            ingredients = clean_ingredients(request.form.get("ingredients", "")[:5000])
+        except CompositionError as exc:
+            flash(f"Composition de « {item.name} » non enregistrée : {exc}", "error")
+            return redirect(url_for("admin_dashboard"))
+        allergens = clean_choices(request.form.getlist("allergens"), ALLERGENS)
+        tags = clean_choices(request.form.getlist("tags"), TAGS)
+
+        comp = MenuItemComposition.query.get(item.id)
+        before = comp.as_dict() if comp else {"ingredients": [], "allergens": [], "tags": []}
+        after = {"ingredients": ingredients, "allergens": allergens, "tags": tags}
+        if before == after:
+            flash("Aucune modification.", "success")
+            return redirect(url_for("admin_dashboard"))
+
+        if comp is None:
+            comp = MenuItemComposition(menu_item_id=item.id, restaurant_id=restaurant.id)
+            db.session.add(comp)
+        comp.ingredients = json.dumps(ingredients, ensure_ascii=False)
+        comp.allergens = json.dumps(allergens)
+        comp.tags = json.dumps(tags)
+
+        details = []
+        if before["ingredients"] != ingredients:
+            details.append(f"{len(ingredients)} ingrédient(s)")
+        if before["allergens"] != allergens:
+            details.append("allergènes : " + (", ".join(ALLERGENS[a][0] for a in allergens) or "aucun"))
+        if before["tags"] != tags:
+            details.append("mentions : " + (", ".join(TAGS[t][0] for t in tags) or "aucune"))
+        log_menu_change(restaurant.id, current_user, "item_edited",
+                        f"Composition de « {item.name} » mise à jour : {' ; '.join(details)}."[:300])
+        db.session.commit()
+        flash(f"Composition de « {item.name} » enregistrée.", "success")
+        return redirect(url_for("admin_dashboard"))
+
+    @app.context_processor
+    def _inject_composition():
+        endpoint = request.endpoint or ""
+        try:
+            if endpoint == "admin_dashboard" and current_user.is_authenticated:
+                restaurant = active_restaurant()
+                if restaurant:
+                    return {"mf_composition": {
+                        "mode": "admin",
+                        "items": compositions_for_restaurant(restaurant.id),
+                        "labels": _label_dict(),
+                        "max_ingredients": MAX_INGREDIENTS,
+                    }}
+            if endpoint == "public_menu":
+                slug = (request.view_args or {}).get("slug")
+                restaurant = Restaurant.query.filter_by(slug=slug, is_active=True).first() if slug else None
+                if restaurant:
+                    return {"mf_composition": {
+                        "mode": "public",
+                        "items": compositions_for_restaurant(restaurant.id),
+                        "labels": _label_dict(),
+                    }}
+        except Exception:
+            db.session.rollback()
+        return {}
+
+    app.jinja_env.globals["mf_allergen_choices"] = [(k, v[0]) for k, v in ALLERGENS.items()]
+    app.jinja_env.globals["mf_tag_choices"] = [(k, v[0]) for k, v in TAGS.items()]
 
 
 ==================== i18n.py ====================
@@ -4099,6 +4366,444 @@ with app.app_context():
         print("Le restaurant de démo existe déjà.")
 
 
+==================== service.py ====================
+"""
+MenuFlash Mini — Service en salle : horaires d'ouverture + appel du serveur.
+
+Branchement dans app.py, JUSTE AVANT `from backups import init_backups` :
+
+    from service import init_service
+    init_service(app, owner_required=owner_required,
+                 active_restaurant=active_restaurant,
+                 limiter=limiter, log_menu_change=log_menu_change)
+
+1. HORAIRES D'OUVERTURE (page Boutique > Horaires d'ouverture)
+   - Jusqu'à 2 créneaux par jour (ex : 11:00-15:00 et 18:00-23:30), avec les
+     créneaux qui passent minuit (ex : 19:00-02:00).
+   - Bouton « Suspendre les commandes maintenant » (cuisine débordée, panne…),
+     avec un message optionnel pour les clients.
+   - En dehors des horaires : le menu reste consultable, mais affiche
+     « Fermé actuellement · Ouvre demain à 11:00 » et refuse les commandes.
+     Le refus est appliqué CÔTÉ SERVEUR (pas seulement masqué à l'écran).
+   - Tant que les horaires ne sont pas activés, rien ne change : le
+     restaurant est considéré comme toujours ouvert.
+
+2. APPEL DU SERVEUR / DEMANDE DE L'ADDITION
+   - Deux boutons sur le menu du client, visibles seulement si sa table est
+     connue (QR code de table) et si le restaurant est ouvert.
+   - L'équipe (gestionnaire ET cuisiniers) voit l'appel sur toutes les pages
+     du back-office, avec un son, en moins de 5 secondes, et le marque
+     « Traité » d'un clic.
+
+Sécurité
+--------
+- Appels clients : jeton CSRF obligatoire, limite de 6 appels / 10 min par
+  appareil, un même appel répété pour la même table n'est enregistré qu'une
+  fois, 40 appels en attente maximum par restaurant, et si le restaurant a
+  des QR codes de table, seules ces tables sont acceptées (impossible
+  d'inventer une table).
+- Horaires : modifiables uniquement par le gestionnaire, valeurs strictement
+  contrôlées (format HH:MM, 2 créneaux max, message limité et filtré).
+- Appels : chaque compte ne voit et ne traite que ceux de son restaurant.
+- Affichage : textes insérés par textContent (aucune injection HTML).
+- Les données sont incluses dans les sauvegardes, et supprimées avec le
+  restaurant (y compris la composition des plats, voir _cleanup_restaurant).
+
+Heure : le Mali est à UTC+0 toute l'année. Pour un autre pays, définir
+MENUFLASH_UTC_OFFSET_MINUTES dans Render (ex : 60 pour UTC+1).
+"""
+import json
+import os
+import re
+from datetime import datetime, timedelta, time as dtime
+
+from flask import (render_template, request, redirect, url_for, flash, jsonify, abort)
+from flask_login import current_user, login_required
+from sqlalchemy import event
+
+from models import db, Restaurant, QRCode
+
+DAYS_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+DAYS_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+MAX_SLOTS_PER_DAY = 2
+CALL_KINDS = {"serveur": ("Appel serveur", "Waiter call"),
+              "addition": ("Demande d'addition", "Bill request")}
+CALL_VISIBLE_MINUTES = 30
+CALL_DEDUP_MINUTES = 3
+MAX_PENDING_CALLS = 40
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+_MESSAGE_RE = re.compile(r"^[\w\s'’\-.,!?:()/%&]*$", re.UNICODE)
+
+
+def utc_offset():
+    try:
+        return timedelta(minutes=max(-720, min(int(os.environ.get("MENUFLASH_UTC_OFFSET_MINUTES", "0")), 840)))
+    except ValueError:
+        return timedelta(0)
+
+
+def local_now():
+    return datetime.utcnow() + utc_offset()
+
+
+# ==========================================================================
+# Modèles (nouvelles tables uniquement, sans clé étrangère bloquante)
+# ==========================================================================
+class RestaurantHours(db.Model):
+    __tablename__ = "restaurant_hours"
+    restaurant_id = db.Column(db.Integer, primary_key=True)
+    enabled = db.Column(db.Boolean, nullable=False, default=False)
+    week = db.Column(db.Text, nullable=False, default="{}")    # {"0": [["11:00","15:00"], ...], ...}
+    suspended = db.Column(db.Boolean, nullable=False, default=False)
+    suspended_message = db.Column(db.String(200))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def slots(self):
+        try:
+            data = json.loads(self.week or "{}")
+        except ValueError:
+            data = {}
+        out = {}
+        for d in range(7):
+            out[d] = [tuple(s) for s in data.get(str(d), [])
+                      if isinstance(s, list) and len(s) == 2
+                      and all(isinstance(x, str) and _TIME_RE.match(x) for x in s)][:MAX_SLOTS_PER_DAY]
+        return out
+
+
+class ServiceCall(db.Model):
+    __tablename__ = "service_calls"
+    id = db.Column(db.Integer, primary_key=True)
+    restaurant_id = db.Column(db.Integer, nullable=False, index=True)
+    table_label = db.Column(db.String(50), nullable=False)
+    kind = db.Column(db.String(20), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="en_attente")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True, nullable=False)
+    handled_at = db.Column(db.DateTime)
+    handled_by = db.Column(db.String(120))
+
+
+# ==========================================================================
+# Calcul ouvert / fermé
+# ==========================================================================
+def _t(hhmm):
+    h, m = hhmm.split(":")
+    return dtime(int(h), int(m))
+
+
+def _intervals_around(slots, now):
+    """Créneaux concrets (début, fin) de la veille, du jour et des 7 jours suivants."""
+    base = now.date()
+    for offset in range(-1, 8):
+        day = base + timedelta(days=offset)
+        for start, end in slots.get(day.weekday(), []):
+            s = datetime.combine(day, _t(start))
+            e = datetime.combine(day, _t(end))
+            if e <= s:                      # passe minuit
+                e += timedelta(days=1)
+            yield s, e
+
+
+def opening_status(restaurant_id, now=None):
+    """Renvoie {"open": bool, "reason": ..., "next": datetime|None, "message": ...}."""
+    rec = RestaurantHours.query.get(restaurant_id)
+    if rec is None:
+        return {"open": True, "reason": None, "next": None, "message": None}
+    if rec.suspended:
+        return {"open": False, "reason": "suspended", "next": None, "message": rec.suspended_message}
+    if not rec.enabled:
+        return {"open": True, "reason": None, "next": None, "message": None}
+    now = now or local_now()
+    intervals = sorted(_intervals_around(rec.slots(), now))
+    for s, e in intervals:
+        if s <= now < e:
+            return {"open": True, "reason": None, "next": None, "closes": e, "message": None}
+    upcoming = [s for s, e in intervals if s > now]
+    return {"open": False, "reason": "hours", "next": upcoming[0] if upcoming else None, "message": None}
+
+
+def next_opening_text(nxt, now=None, lang="fr"):
+    if nxt is None:
+        return ""
+    now = now or local_now()
+    delta_days = (nxt.date() - now.date()).days
+    hhmm = nxt.strftime("%H:%M")
+    if lang == "en":
+        when = "today" if delta_days == 0 else "tomorrow" if delta_days == 1 else DAYS_EN[nxt.weekday()]
+        return f"Opens {when} at {hhmm}"
+    when = "aujourd'hui" if delta_days == 0 else "demain" if delta_days == 1 else DAYS_FR[nxt.weekday()].lower()
+    return f"Ouvre {when} à {hhmm}"
+
+
+# ==========================================================================
+# Validation du formulaire d'horaires
+# ==========================================================================
+class HoursError(ValueError):
+    pass
+
+
+def parse_week(form):
+    week = {}
+    for d in range(7):
+        slots = []
+        if form.get(f"closed_{d}"):
+            week[str(d)] = []
+            continue
+        for n in range(1, MAX_SLOTS_PER_DAY + 1):
+            start = (form.get(f"open_{d}_{n}") or "").strip()
+            end = (form.get(f"close_{d}_{n}") or "").strip()
+            if not start and not end:
+                continue
+            if not (_TIME_RE.match(start) and _TIME_RE.match(end)):
+                raise HoursError(f"{DAYS_FR[d]} : heure invalide (format HH:MM, ex : 11:30).")
+            if start == end:
+                raise HoursError(f"{DAYS_FR[d]} : l'heure d'ouverture et de fermeture sont identiques.")
+            slots.append([start, end])
+        if len(slots) == 2:
+            a, b = sorted(slots)
+            a_end = datetime.combine(datetime.min.date(), _t(a[1]))
+            if a[1] <= a[0]:
+                raise HoursError(f"{DAYS_FR[d]} : seul le dernier créneau peut passer minuit.")
+            if datetime.combine(datetime.min.date(), _t(b[0])) < a_end:
+                raise HoursError(f"{DAYS_FR[d]} : les deux créneaux se chevauchent.")
+            slots = [a, b]
+        week[str(d)] = slots
+    return week
+
+
+def clean_message(raw):
+    msg = re.sub(r"\s+", " ", (raw or "")).strip()[:200]
+    if msg and not _MESSAGE_RE.match(msg):
+        raise HoursError("Le message contient des caractères non autorisés.")
+    return msg or None
+
+
+# ==========================================================================
+# Branchement
+# ==========================================================================
+def init_service(app, *, owner_required, active_restaurant, limiter=None, log_menu_change=None):
+
+    with app.app_context():
+        for model in (RestaurantHours, ServiceCall):
+            model.__table__.create(db.engine, checkfirst=True)
+
+    # ---------------- Nettoyage à la suppression d'un restaurant ----------------
+    def _cleanup_restaurant(rid):
+        db.session.execute(RestaurantHours.__table__.delete().where(RestaurantHours.restaurant_id == rid))
+        db.session.execute(ServiceCall.__table__.delete().where(ServiceCall.restaurant_id == rid))
+        comp = db.metadata.tables.get("menu_item_compositions")
+        if comp is not None:   # composition des plats : clé étrangère vers les plats
+            db.session.execute(comp.delete().where(comp.c.restaurant_id == rid))
+
+    original_delete = app.view_functions.get("super_admin_restaurant_delete")
+    if original_delete is not None:
+        def _delete_with_cleanup(restaurant_id):
+            r = Restaurant.query.get(restaurant_id)
+            if r is not None and request.method == "POST" and \
+                    (request.form.get("confirm_slug") or "").strip() == r.slug:
+                try:
+                    from super_admin import RestaurantAdminMeta
+                    meta = RestaurantAdminMeta.query.get(r.id)
+                    if meta and meta.archived_at:
+                        _cleanup_restaurant(r.id)
+                except Exception:
+                    db.session.rollback()
+            return original_delete(restaurant_id=restaurant_id)
+        app.view_functions["super_admin_restaurant_delete"] = _delete_with_cleanup
+
+    # ---------------- Refus des commandes quand le restaurant est fermé ----------------
+    ORDER_ENDPOINTS = {"place_order", "add_to_order"}
+
+    @app.before_request
+    def _enforce_opening_hours():
+        if request.endpoint not in ORDER_ENDPOINTS or request.method != "POST":
+            return None
+        slug = (request.view_args or {}).get("slug")
+        r = Restaurant.query.filter_by(slug=slug, is_active=True).first() if slug else None
+        if r is None:
+            return None
+        st = opening_status(r.id)
+        if st["open"]:
+            return None
+        msg = st["message"] or "Le restaurant ne prend pas de commandes pour le moment."
+        if st["reason"] == "hours":
+            msg = "Le restaurant est fermé actuellement." + (
+                f" {next_opening_text(st['next'])}." if st["next"] else "")
+        if request.headers.get("X-Requested-With") == "fetch" or request.is_json:
+            return jsonify({"ok": False, "error": msg, "closed": True}), 409
+        flash(msg, "error")
+        return redirect(url_for("public_menu", slug=slug))
+
+    # ---------------- Table du client (même logique que le menu public) ----------------
+    def _resolve_table(restaurant):
+        qr_id = request.values.get("qr", type=int) or request.values.get("qr_id", type=int)
+        if qr_id:
+            qr = QRCode.query.filter_by(id=qr_id, restaurant_id=restaurant.id).first()
+            if qr:
+                return qr.label
+        label = re.sub(r"\s+", " ", (request.values.get("t") or request.values.get("table_label") or "")).strip()[:50]
+        if not label:
+            return None
+        if QRCode.query.filter_by(restaurant_id=restaurant.id).count():
+            # Le restaurant utilise des QR de table : seules ses tables existent.
+            if not QRCode.query.filter_by(restaurant_id=restaurant.id, label=label).first():
+                return None
+        return label
+
+    # ---------------- Appel du serveur (client) ----------------
+    def service_call(slug):
+        r = Restaurant.query.filter_by(slug=slug, is_active=True).first_or_404()
+        if not r.is_subscription_valid:
+            abort(404)
+        kind = request.form.get("kind", "")
+        if kind not in CALL_KINDS:
+            return jsonify({"ok": False, "error": "Demande invalide."}), 400
+        if not opening_status(r.id)["open"]:
+            return jsonify({"ok": False, "error": "Le restaurant est fermé actuellement."}), 409
+        table = _resolve_table(r)
+        if not table:
+            return jsonify({"ok": False, "error": "Table inconnue : scannez le QR code de votre table."}), 400
+        now = datetime.utcnow()
+        recent = ServiceCall.query.filter(
+            ServiceCall.restaurant_id == r.id, ServiceCall.table_label == table,
+            ServiceCall.kind == kind, ServiceCall.status == "en_attente",
+            ServiceCall.created_at >= now - timedelta(minutes=CALL_DEDUP_MINUTES)).first()
+        if recent:
+            return jsonify({"ok": True, "duplicate": True})
+        pending = ServiceCall.query.filter(
+            ServiceCall.restaurant_id == r.id, ServiceCall.status == "en_attente",
+            ServiceCall.created_at >= now - timedelta(minutes=CALL_VISIBLE_MINUTES)).count()
+        if pending >= MAX_PENDING_CALLS:
+            return jsonify({"ok": False, "error": "Trop de demandes en cours, merci de patienter."}), 429
+        db.session.add(ServiceCall(restaurant_id=r.id, table_label=table, kind=kind))
+        db.session.commit()
+        return jsonify({"ok": True})
+
+    view = service_call
+    if limiter is not None:
+        view = limiter.limit("6 per 10 minutes", methods=["POST"])(view)
+    app.add_url_rule("/m/<slug>/appel", "service_call", view, methods=["POST"])
+
+    # ---------------- Appels (équipe du restaurant) ----------------
+    def _staff_restaurant():
+        if not current_user.is_authenticated or getattr(current_user, "is_super_admin", False):
+            abort(403)
+        r = active_restaurant()
+        if r is None:
+            abort(403)
+        return r
+
+    @app.route("/admin/appels.json")
+    @login_required
+    def service_calls_feed():
+        r = _staff_restaurant()
+        now = datetime.utcnow()
+        calls = (ServiceCall.query.filter(
+            ServiceCall.restaurant_id == r.id, ServiceCall.status == "en_attente",
+            ServiceCall.created_at >= now - timedelta(minutes=CALL_VISIBLE_MINUTES))
+            .order_by(ServiceCall.created_at.asc()).limit(MAX_PENDING_CALLS).all())
+        latest = db.session.query(db.func.max(ServiceCall.id)).filter(
+            ServiceCall.restaurant_id == r.id).scalar() or 0
+        resp = jsonify({"latest_id": latest, "calls": [{
+            "id": c.id, "table": c.table_label, "kind": c.kind,
+            "label": CALL_KINDS[c.kind][0] if c.kind in CALL_KINDS else c.kind,
+            "minutes": max(int((now - c.created_at).total_seconds() // 60), 0),
+        } for c in calls]})
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @app.route("/admin/appels/<int:call_id>/traiter", methods=["POST"])
+    @login_required
+    def service_call_handle(call_id):
+        r = _staff_restaurant()
+        c = ServiceCall.query.filter_by(id=call_id, restaurant_id=r.id).first_or_404()
+        if c.status == "en_attente":
+            c.status = "traite"
+            c.handled_at = datetime.utcnow()
+            c.handled_by = current_user.email[:120]
+            db.session.commit()
+        return jsonify({"ok": True})
+
+    # ---------------- Horaires (gestionnaire) ----------------
+    @app.route("/admin/horaires", methods=["GET", "POST"])
+    @owner_required
+    def admin_hours():
+        restaurant = active_restaurant()
+        rec = RestaurantHours.query.get(restaurant.id)
+        if request.method == "POST":
+            action = request.form.get("action", "save")
+            if rec is None:
+                rec = RestaurantHours(restaurant_id=restaurant.id, week="{}")
+                db.session.add(rec)
+            try:
+                if action == "suspend":
+                    rec.suspended = True
+                    rec.suspended_message = clean_message(request.form.get("message"))
+                    note = "Commandes suspendues."
+                elif action == "resume":
+                    rec.suspended = False
+                    rec.suspended_message = None
+                    note = "Commandes reprises."
+                else:
+                    week = parse_week(request.form)
+                    rec.enabled = bool(request.form.get("enabled"))
+                    if rec.enabled and not any(week.values()):
+                        raise HoursError("Indiquez au moins un créneau d'ouverture, ou désactivez les horaires.")
+                    rec.week = json.dumps(week)
+                    note = "Horaires d'ouverture " + ("activés et mis à jour." if rec.enabled else "désactivés.")
+            except HoursError as exc:
+                db.session.rollback()
+                flash(str(exc), "error")
+                return redirect(url_for("admin_hours"))
+            if log_menu_change:
+                log_menu_change(restaurant.id, current_user, "hours_updated", note)
+            db.session.commit()
+            flash(note, "success")
+            return redirect(url_for("admin_hours"))
+
+        slots = rec.slots() if rec else {d: [] for d in range(7)}
+        st = opening_status(restaurant.id)
+        return render_template(
+            "admin_hours.html", restaurant=restaurant, rec=rec, slots=slots, days=DAYS_FR,
+            status=st, next_text=next_opening_text(st.get("next")),
+            now_local=local_now())
+
+    # ---------------- Données pour les pages ----------------
+    @app.context_processor
+    def _inject_service():
+        try:
+            endpoint = request.endpoint or ""
+            if endpoint == "public_menu":
+                slug = (request.view_args or {}).get("slug")
+                r = Restaurant.query.filter_by(slug=slug, is_active=True).first() if slug else None
+                if r is None:
+                    return {}
+                st = opening_status(r.id)
+                return {"mf_service": {
+                    "mode": "public",
+                    "call_url": url_for("service_call", slug=r.slug),
+                    "table": _resolve_table(r),
+                    "qr": request.args.get("qr", type=int),
+                    "t": (request.args.get("t") or "")[:50],
+                    "open": st["open"],
+                    "reason": st["reason"],
+                    "message": st["message"],
+                    "next_fr": next_opening_text(st.get("next"), lang="fr"),
+                    "next_en": next_opening_text(st.get("next"), lang="en"),
+                }}
+            if (current_user.is_authenticated and not getattr(current_user, "is_super_admin", False)
+                    and (endpoint.startswith("admin_") or endpoint in ("change_password", "edit_item_composition"))
+                    and endpoint not in ("admin_login", "admin_logout")):
+                return {"mf_service": {
+                    "mode": "staff",
+                    "feed_url": url_for("service_calls_feed"),
+                    "handle_url": "/admin/appels/{id}/traiter",
+                }}
+        except Exception:
+            db.session.rollback()
+        return {}
+
+
 ==================== static\app.js ====================
 /* ==========================================================================
    MenuFlash Mini — interactivité JS (progressive enhancement)
@@ -5298,6 +6003,374 @@ with app.app_context():
 
 
 
+==================== static\composition.css ====================
+/* ==========================================================================
+   MenuFlash Mini — cases à cocher lisibles + composition des plats
+   ========================================================================== */
+
+/* ---------- Cases à cocher : correctif global ----------
+   La règle « .mf-suggestion-check { padding: 3px 0 } » supprimait la marge
+   gauche réservée par Bootstrap à la case : celle-ci sortait du cadre et
+   était coupée. On la rétablit, et on rend toutes les cases bien visibles. */
+.mf-suggestion-check,
+.mf-check {
+  padding: 6px 8px 6px 2.1rem !important;
+  margin: 0;
+  border-radius: 8px;
+  min-height: 2rem;
+  display: flex;
+  align-items: center;
+}
+.mf-suggestion-check:hover, .mf-check:hover { background: rgba(0, 0, 0, .035); }
+.mf-suggestion-check .form-check-input,
+.mf-check .form-check-input {
+  width: 1.2rem;
+  height: 1.2rem;
+  margin-left: -1.65rem;
+  margin-top: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.mf-suggestion-check .form-check-label,
+.mf-check .form-check-label { cursor: pointer; padding-left: .2rem; line-height: 1.3; }
+
+.form-check-input {
+  border: 2px solid #9A968E;
+  background-color: #fff;
+}
+.form-check-input:checked {
+  background-color: var(--mf-accent);
+  border-color: var(--mf-accent);
+}
+.form-check-input:focus {
+  border-color: var(--mf-accent);
+  box-shadow: 0 0 0 .2rem color-mix(in srgb, var(--mf-accent) 30%, transparent);
+}
+.mf-suggestion-list { padding: 6px !important; }
+
+/* ---------- Grille des allergènes / mentions (modale) ---------- */
+.mf-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 2px 8px;
+  background: var(--mf-bg);
+  border: 1px solid var(--mf-border);
+  border-radius: 10px;
+  padding: 6px;
+}
+.mf-comp-preview { display: flex; flex-wrap: wrap; gap: 6px; min-height: 0; }
+.mf-comp-preview:empty { display: none; }
+
+/* ---------- Puces (aperçu, tableau de bord et menu public) ---------- */
+.mf-comp-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .74rem; font-weight: 600; line-height: 1.2;
+  padding: 3px 9px; border-radius: 999px;
+  background: #fff; border: 1px solid var(--mf-border); color: var(--mf-ink);
+  max-width: 100%; overflow-wrap: anywhere;
+}
+.mf-comp-chip--allergen { background: var(--mf-danger-bg); border-color: transparent; color: var(--mf-danger); }
+.mf-comp-chip--tag { background: var(--mf-success-bg); border-color: transparent; color: var(--mf-success); }
+
+/* ---------- Bouton « Composition » du tableau de bord ---------- */
+.mf-comp-btn { color: var(--mf-ink-soft); font-size: .95rem; position: relative; }
+.mf-comp-btn:hover { background: var(--mf-accent-light); color: var(--mf-accent-dark); }
+.mf-comp-btn.has-data::after {
+  content: ""; position: absolute; top: 4px; right: 4px;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--mf-success);
+}
+.mf-comp-summary { font-size: .78rem; color: var(--mf-ink-soft); margin-top: 2px; }
+
+/* ---------- Menu public ---------- */
+.mf-item-composition { margin-top: 6px; width: 100%; }
+.mf-item-composition .mf-comp-ingredients {
+  font-size: .8rem; color: var(--mf-ink-soft); margin: 0 0 4px; line-height: 1.35;
+}
+.mf-item-composition .mf-comp-ingredients strong { color: var(--mf-ink); font-weight: 600; }
+.mf-item-composition .mf-comp-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+
+
+==================== static\composition.js ====================
+/* ==========================================================================
+   MenuFlash Mini — composition des plats (tableau de bord et menu public).
+   Toutes les données sont insérées via textContent : aucun HTML venant de
+   la base n'est jamais interprété par le navigateur.
+   ========================================================================== */
+(function () {
+  "use strict";
+
+  var dataEl = document.getElementById("mf-composition-data");
+  if (!dataEl) return;
+  var data;
+  try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
+  var items = data.items || {};
+  var labels = data.labels || {};
+
+  function lang() {
+    try { return localStorage.getItem("mf_lang") === "en" ? "en" : "fr"; } catch (e) { return "fr"; }
+  }
+  function label(kind, key) {
+    var entry = (labels[kind] || {})[key];
+    return entry ? (entry[lang()] || entry.fr) : key;
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function chip(kind, key) {
+    var c = el("span", "mf-comp-chip mf-comp-chip--" + (kind === "allergens" ? "allergen" : "tag"));
+    c.appendChild(el("i", "bi " + (kind === "allergens" ? "bi-exclamation-triangle-fill" : "bi-check2")));
+    c.appendChild(document.createTextNode(label(kind, key)));
+    return c;
+  }
+  function splitIngredients(raw) {
+    var seen = {}, out = [];
+    String(raw || "").split(/[\n\r,;]+/).forEach(function (part) {
+      var t = part.replace(/\s+/g, " ").trim();
+      if (t && !seen[t.toLowerCase()]) { seen[t.toLowerCase()] = 1; out.push(t); }
+    });
+    return out;
+  }
+
+  /* ----------------------------- Menu public ----------------------------- */
+  function renderPublic() {
+    document.querySelectorAll(".mf-qty-group[data-item-id]").forEach(function (group) {
+      var comp = items[group.dataset.itemId];
+      var card = group.closest(".card-body");
+      if (!card) return;
+      var info = group.parentElement.querySelector(".flex-grow-1") || card;
+      var box = info.querySelector(".mf-item-composition");
+      if (box) box.remove();
+      if (!comp) return;
+
+      box = el("div", "mf-item-composition");
+      if (comp.ingredients && comp.ingredients.length) {
+        var p = el("p", "mf-comp-ingredients");
+        p.appendChild(el("strong", null, ((labels.ui || {})[lang()] || {}).composition + " : "));
+        p.appendChild(document.createTextNode(comp.ingredients.join(", ")));
+        box.appendChild(p);
+      }
+      if ((comp.allergens || []).length || (comp.tags || []).length) {
+        var chips = el("div", "mf-comp-chips");
+        (comp.allergens || []).forEach(function (k) { chips.appendChild(chip("allergens", k)); });
+        (comp.tags || []).forEach(function (k) { chips.appendChild(chip("tags", k)); });
+        box.appendChild(chips);
+      }
+      info.appendChild(box);
+    });
+  }
+
+  /* --------------------------- Tableau de bord --------------------------- */
+  function renderAdmin() {
+    var modalEl = document.getElementById("mf-composition-modal");
+    var form = document.getElementById("mf-composition-form");
+    if (!modalEl || !form) return;
+    var textarea = document.getElementById("mf-composition-ingredients");
+    var preview = document.getElementById("mf-composition-preview");
+    var counter = document.getElementById("mf-composition-count");
+    var nameEl = document.getElementById("mf-composition-name");
+
+    function updatePreview() {
+      var list = splitIngredients(textarea.value);
+      counter.textContent = list.length;
+      counter.parentElement.classList.toggle("text-danger", list.length > (data.max_ingredients || 30));
+      preview.textContent = "";
+      list.slice(0, 40).forEach(function (t) { preview.appendChild(el("span", "mf-comp-chip", t)); });
+    }
+    textarea.addEventListener("input", updatePreview);
+
+    function open(itemId, itemName) {
+      var comp = items[itemId] || { ingredients: [], allergens: [], tags: [] };
+      form.action = "/admin/items/" + encodeURIComponent(itemId) + "/composition";
+      nameEl.textContent = itemName || "";
+      textarea.value = (comp.ingredients || []).join("\n");
+      form.querySelectorAll('input[name="allergens"]').forEach(function (c) { c.checked = (comp.allergens || []).indexOf(c.value) !== -1; });
+      form.querySelectorAll('input[name="tags"]').forEach(function (c) { c.checked = (comp.tags || []).indexOf(c.value) !== -1; });
+      updatePreview();
+      bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+
+    document.querySelectorAll(".mf-edit-item-btn[data-item-id]").forEach(function (editBtn) {
+      if (editBtn.parentElement.querySelector(".mf-comp-btn")) return;
+      var id = editBtn.dataset.itemId, name = editBtn.dataset.itemName || "";
+      var comp = items[id];
+      var btn = el("button", "btn btn-sm btn-outline-secondary border-0 mf-comp-btn" + (comp ? " has-data" : ""));
+      btn.type = "button";
+      btn.title = "Composition et allergènes";
+      btn.setAttribute("aria-label", "Composition et allergènes de " + name);
+      btn.appendChild(el("i", "bi bi-list-check"));
+      btn.addEventListener("click", function () { open(id, name); });
+      editBtn.insertAdjacentElement("afterend", btn);
+
+      if (comp) {
+        var cell = editBtn.closest("tr") && editBtn.closest("tr").querySelector(".fw-semibold");
+        if (cell && !cell.parentElement.querySelector(".mf-comp-summary")) {
+          var parts = [];
+          if (comp.ingredients.length) parts.push(comp.ingredients.length + " ingrédient" + (comp.ingredients.length > 1 ? "s" : ""));
+          if (comp.allergens.length) parts.push(comp.allergens.length + " allergène" + (comp.allergens.length > 1 ? "s" : ""));
+          var s = el("div", "mf-comp-summary");
+          s.appendChild(el("i", "bi bi-list-check me-1"));
+          s.appendChild(document.createTextNode(parts.join(" · ") || "mentions renseignées"));
+          cell.parentElement.appendChild(s);
+        }
+      }
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    if (data.mode === "public") {
+      renderPublic();
+      document.querySelectorAll(".mf-lang-btn").forEach(function (b) {
+        b.addEventListener("click", function () { setTimeout(renderPublic, 0); });
+      });
+    } else if (data.mode === "admin") {
+      renderAdmin();
+    }
+  });
+})();
+
+
+==================== static\file_upload.css ====================
+/* ==========================================================================
+   MenuFlash Mini — champ « Photo » compact et lisible.
+   Remplace l'affichage natif « Choisir un fichier | Aucun fichier choisi »,
+   qui était tronqué dans les colonnes étroites (formulaire d'ajout de plat).
+   Le vrai champ <input type="file"> reste dans la page (envoi du formulaire,
+   clavier, lecteurs d'écran) ; il est seulement masqué visuellement.
+   ========================================================================== */
+.mf-file { position: relative; display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; }
+.mf-file > input[type="file"] {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; opacity: 0;
+}
+.mf-file-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  flex: 1 1 auto; min-width: 0; margin: 0; cursor: pointer;
+  border: 1px dashed #B9B4AA; background: #fff; color: var(--mf-ink, #1A1D23);
+  border-radius: var(--bs-border-radius-sm, 8px); padding: .375rem .75rem;
+  font-size: .9rem; font-weight: 600; line-height: 1.5; white-space: nowrap;
+  transition: border-color .15s ease, background-color .15s ease;
+}
+.mf-file--sm .mf-file-btn { padding: .25rem .5rem; font-size: .82rem; min-height: 31px; }
+.mf-file-btn:hover { border-color: var(--mf-accent, #D98E1F); background: var(--mf-accent-light, #FBE9CC); }
+.mf-file > input[type="file"]:focus-visible + .mf-file-btn {
+  outline: 0; border-color: var(--mf-accent, #D98E1F);
+  box-shadow: 0 0 0 .2rem color-mix(in srgb, var(--mf-accent, #D98E1F) 30%, transparent);
+}
+.mf-file-btn i { color: var(--mf-accent-dark, #B5730F); flex-shrink: 0; }
+.mf-file-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mf-file.has-file .mf-file-btn { border-style: solid; border-color: var(--mf-success, #2E7D5B); background: var(--mf-success-bg, #E2F3EA); }
+.mf-file.has-file .mf-file-btn i { color: var(--mf-success, #2E7D5B); }
+.mf-file-thumb { width: 31px; height: 31px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.mf-file:not(.mf-file--sm) .mf-file-thumb { width: 38px; height: 38px; }
+.mf-file-clear {
+  flex-shrink: 0; border: 0; background: transparent; color: var(--mf-ink-soft, #6B6A66);
+  width: 26px; height: 26px; border-radius: 50%; padding: 0; line-height: 1;
+}
+.mf-file-clear:hover { background: var(--mf-danger-bg, #F8E0DD); color: var(--mf-danger, #C4453A); }
+.mf-file-error { flex-basis: 100%; font-size: .75rem; color: var(--mf-danger, #C4453A); }
+.mf-file { flex-wrap: wrap; }
+.mf-file-thumb[hidden], .mf-file-clear[hidden], .mf-file-error[hidden] { display: none !important; }
+
+
+==================== static\file_upload.js ====================
+/* ==========================================================================
+   MenuFlash Mini — champ « Photo » compact (voir file_upload.css).
+   - Bouton lisible « Photo » / « Fichier », puis nom du fichier + miniature.
+   - Bouton × pour retirer le fichier choisi.
+   - Contrôle immédiat du type et de la taille (5 Mo, comme le serveur) :
+     évite d'envoyer un formulaire qui serait rejeté.
+   Le serveur continue de tout vérifier (recompression de l'image, etc.).
+   ========================================================================== */
+(function () {
+  "use strict";
+  var MAX_BYTES = 5 * 1024 * 1024;
+  var counter = 0;
+
+  function enhance(input) {
+    if (input.dataset.mfFile === "1" || input.closest(".mf-file")) return;
+    input.dataset.mfFile = "1";
+    if (!input.id) input.id = "mf-file-" + (++counter);
+
+    var isImage = /image/.test(input.getAttribute("accept") || "") || input.name === "photo" || input.name === "logo";
+    var emptyText = isImage ? "Photo" : "Choisir un fichier";
+    var small = input.classList.contains("form-control-sm");
+
+    var wrap = document.createElement("div");
+    wrap.className = "mf-file" + (small ? " mf-file--sm" : "");
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    input.classList.remove("form-control", "form-control-sm");
+
+    var btn = document.createElement("label");
+    btn.className = "mf-file-btn";
+    btn.htmlFor = input.id;
+    btn.title = "Choisir " + (isImage ? "une photo (JPG, PNG ou WEBP, 5 Mo max.)" : "un fichier");
+    var icon = document.createElement("i");
+    icon.className = "bi " + (isImage ? "bi-camera" : "bi-paperclip");
+    var name = document.createElement("span");
+    name.className = "mf-file-name";
+    name.textContent = emptyText;
+    btn.appendChild(icon); btn.appendChild(name);
+    wrap.appendChild(btn);
+
+    var thumb = document.createElement("img");
+    thumb.className = "mf-file-thumb"; thumb.alt = ""; thumb.hidden = true;
+    wrap.appendChild(thumb);
+
+    var clear = document.createElement("button");
+    clear.type = "button"; clear.className = "mf-file-clear"; clear.hidden = true;
+    clear.setAttribute("aria-label", "Retirer le fichier");
+    clear.innerHTML = '<i class="bi bi-x-lg"></i>';
+    wrap.appendChild(clear);
+
+    var error = document.createElement("div");
+    error.className = "mf-file-error"; error.hidden = true; error.setAttribute("role", "alert");
+    wrap.appendChild(error);
+
+    var url = null;
+    function reset(message) {
+      input.value = "";
+      if (url) { URL.revokeObjectURL(url); url = null; }
+      thumb.hidden = true; thumb.removeAttribute("src");
+      clear.hidden = true;
+      wrap.classList.remove("has-file");
+      name.textContent = emptyText;
+      icon.className = "bi " + (isImage ? "bi-camera" : "bi-paperclip");
+      error.textContent = message || ""; error.hidden = !message;
+    }
+
+    input.addEventListener("change", function () {
+      var f = input.files && input.files[0];
+      if (!f) { reset(); return; }
+      if (f.size > MAX_BYTES) { reset("Fichier trop lourd (" + (f.size / 1048576).toFixed(1) + " Mo) : 5 Mo maximum."); return; }
+      if (isImage && !/^image\/(jpeg|png|webp)$/i.test(f.type)) { reset("Format non accepté : JPG, PNG ou WEBP uniquement."); return; }
+      error.hidden = true;
+      wrap.classList.add("has-file");
+      name.textContent = f.name;
+      btn.title = f.name;
+      icon.className = "bi bi-check-circle-fill";
+      clear.hidden = false;
+      if (isImage) {
+        if (url) URL.revokeObjectURL(url);
+        url = URL.createObjectURL(f);
+        thumb.src = url; thumb.hidden = false;
+      }
+    });
+    clear.addEventListener("click", function () { reset(); input.focus(); });
+    var form = input.form;
+    if (form) form.addEventListener("reset", function () { setTimeout(function () { reset(); }, 0); });
+  }
+
+  function run(root) {
+    (root || document).querySelectorAll('input[type="file"]').forEach(enhance);
+  }
+  document.addEventListener("DOMContentLoaded", function () { run(document); });
+})();
+
+
 ==================== static\forms_security.css ====================
 /* MenuFlash Mini — styles de l'aide à la saisie sécurisée (forms_security.js) */
 .mf-pwd-wrap { position: relative; }
@@ -6079,6 +7152,318 @@ input[type="file"].form-control { overflow: hidden; text-overflow: ellipsis; }
       pending = true;
       requestAnimationFrame(function () { pending = false; wrapTables(document); });
     }).observe(document.body, { childList: true, subtree: true });
+  });
+})();
+
+
+==================== static\service.css ====================
+/* ==========================================================================
+   MenuFlash Mini — horaires d'ouverture + appel du serveur
+   ========================================================================== */
+
+/* ---------- Menu public : zone de service, DANS l'en-tête sombre ----------
+   Placée sous le badge de la table : elle ne chevauche plus la barre des
+   catégories (qui remonte de 32 px sur l'en-tête). */
+.mf-hero .mf-service-host { max-width: 440px; margin: 16px auto 0; padding: 0 4px; }
+
+/* Bandeau « Fermé » */
+.mf-closed-banner {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 12px 16px; border-radius: 14px;
+  background: rgba(196, 69, 58, .18); border: 1px solid rgba(255, 140, 128, .55);
+  color: #FFD9D4; font-weight: 700;
+}
+.mf-closed-banner i { font-size: 1.4rem; flex-shrink: 0; }
+.mf-closed-banner small { display: block; font-weight: 500; color: #fff; opacity: .85; }
+body.mf-is-closed .mf-qty-group,
+body.mf-is-closed #cart-bar,
+body.mf-is-closed .mf-addto-btn { display: none !important; }
+
+/* Boutons d'appel : deux pastilles côte à côte, style « verre » sur fond sombre */
+.mf-call-bar { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.mf-call-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  flex: 1 1 0; min-width: 0; max-width: 210px;
+  padding: 9px 14px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .28); background: rgba(255, 255, 255, .10);
+  color: #fff; font-weight: 600; font-size: .85rem; line-height: 1.2;
+  transition: transform .1s ease, background-color .2s ease, border-color .2s ease;
+}
+.mf-call-btn i { font-size: 1rem; color: var(--mf-accent, #D98E1F); flex-shrink: 0; }
+.mf-call-btn:hover { background: rgba(255, 255, 255, .18); border-color: rgba(255, 255, 255, .45); }
+.mf-call-btn:active { transform: scale(.97); }
+.mf-call-btn:focus-visible { outline: 2px solid var(--mf-accent, #D98E1F); outline-offset: 2px; }
+.mf-call-btn:disabled { opacity: 1; background: rgba(46, 125, 91, .35); border-color: rgba(120, 220, 170, .6); }
+.mf-call-btn:disabled i { color: #9BE3BF; }
+.mf-call-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 359.98px) {
+  .mf-call-btn { font-size: .78rem; padding: 8px 10px; gap: 5px; }
+}
+
+/* ---------- Back-office : panneau des appels ---------- */
+.mf-calls-panel {
+  position: fixed; right: 16px; bottom: 16px; z-index: 1070;
+  width: min(340px, calc(100vw - 32px));
+  background: #fff; border-radius: 16px; overflow: hidden;
+  box-shadow: 0 14px 40px rgba(26,29,35,.28); border: 2px solid var(--mf-accent, #D98E1F);
+  animation: mf-calls-in .25s ease;
+}
+@keyframes mf-calls-in { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+.mf-calls-head {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  background: var(--mf-accent, #D98E1F); color: #fff; font-weight: 700;
+}
+.mf-calls-head .mf-calls-bell { animation: mf-ring 1.2s ease-in-out infinite; transform-origin: top center; }
+@keyframes mf-ring { 0%, 60%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(14deg); } 20%, 40% { transform: rotate(-14deg); } }
+.mf-calls-toggle { margin-left: auto; background: transparent; border: 0; color: #fff; font-size: 1rem; padding: 0 2px; }
+.mf-calls-list { max-height: 50vh; overflow-y: auto; }
+.mf-calls-panel.is-collapsed .mf-calls-list { display: none; }
+.mf-call-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--mf-border, #E7E4DD); }
+.mf-call-item:last-child { border-bottom: 0; }
+.mf-call-icon {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--mf-accent-light, #FBE9CC); color: var(--mf-accent-dark, #B5730F);
+}
+.mf-call-item.is-bill .mf-call-icon { background: var(--mf-success-bg, #E2F3EA); color: var(--mf-success, #2E7D5B); }
+.mf-call-text { flex: 1 1 auto; min-width: 0; line-height: 1.25; }
+.mf-call-text strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mf-call-text small { color: var(--mf-ink-soft, #6B6A66); }
+.mf-call-done { flex-shrink: 0; font-size: .78rem; font-weight: 700; }
+body.mf-is-public .mf-calls-panel { display: none; }
+
+/* ---------- Page Horaires ---------- */
+.mf-hours-grid { display: flex; flex-direction: column; gap: 6px; }
+.mf-hours-row {
+  display: grid; grid-template-columns: 96px 80px 1fr; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 10px; background: var(--mf-bg, #F7F6F3);
+}
+.mf-hours-row.is-closed .mf-hours-slots { opacity: .35; }
+.mf-hours-day { font-weight: 700; }
+.mf-hours-slots { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.mf-hours-slot { display: flex; align-items: center; gap: 6px; }
+.mf-hours-slot input { width: 110px; }
+@media (max-width: 575.98px) {
+  .mf-hours-row { grid-template-columns: 1fr auto; }
+  .mf-hours-slots { grid-column: 1 / -1; }
+  .mf-hours-slot input { width: 100%; min-width: 0; }
+  .mf-hours-slot { flex: 1 1 100%; }
+}
+
+
+==================== static\service.js ====================
+/* ==========================================================================
+   MenuFlash Mini — horaires d'ouverture + appel du serveur (navigateur).
+   Toutes les données sont insérées via textContent : aucune injection HTML.
+   ========================================================================== */
+(function () {
+  "use strict";
+
+  var dataEl = document.getElementById("mf-service-data");
+  if (!dataEl) return;
+  var cfg;
+  try { cfg = JSON.parse(dataEl.textContent); } catch (e) { return; }
+
+  var TEXT = {
+    fr: { closed: "Fermé actuellement", suspended: "Commandes momentanément suspendues",
+          waiter: "Appeler le serveur", bill: "L'addition",
+          waiterSent: "Serveur prévenu", billSent: "Addition demandée",
+          sentToast: "C'est noté : un serveur arrive à votre table.",
+          error: "Impossible d'envoyer la demande. Vérifiez votre connexion." },
+    en: { closed: "Closed right now", suspended: "Orders temporarily paused",
+          waiter: "Call the waiter", bill: "The bill",
+          waiterSent: "Waiter notified", billSent: "Bill requested",
+          sentToast: "Got it: a waiter is coming to your table.",
+          error: "Could not send the request. Check your connection." }
+  };
+  function lang() { try { return localStorage.getItem("mf_lang") === "en" ? "en" : "fr"; } catch (e) { return "fr"; } }
+  function t(k) { return TEXT[lang()][k]; }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function icon(name) { return el("i", "bi " + name); }
+  function toast(msg, isError) { if (window.MFShowToast) window.MFShowToast(msg, !!isError); }
+  function csrf() { var m = document.querySelector('meta[name="csrf-token"]'); return m ? m.getAttribute("content") : ""; }
+
+  /* ============================ Menu public ============================ */
+  function initPublic() {
+    document.body.classList.add("mf-is-public");
+    var hero = document.querySelector(".mf-hero");
+    var host = el("div", "mf-service-host");
+    // Dans l'en-tête, sous le nom du restaurant et le badge de la table.
+    if (hero) hero.appendChild(host);
+    else document.body.insertBefore(host, document.body.firstChild);
+
+    var buttons = {};
+
+    function render() {
+      host.textContent = "";
+      buttons = {};
+      if (!cfg.open) {
+        document.body.classList.add("mf-is-closed");
+        var b = el("div", "mf-closed-banner");
+        b.setAttribute("role", "status");
+        b.appendChild(icon(cfg.reason === "suspended" ? "bi-pause-circle-fill" : "bi-moon-fill"));
+        var txt = el("div", null, cfg.reason === "suspended" ? t("suspended") : t("closed"));
+        var sub = cfg.reason === "suspended" ? (cfg.message || "") : (lang() === "en" ? cfg.next_en : cfg.next_fr);
+        if (sub) txt.appendChild(el("small", null, sub));
+        b.appendChild(txt);
+        host.appendChild(b);
+        return;
+      }
+      if (!cfg.table) { host.remove(); return; }
+      var bar = el("div", "mf-call-bar");
+      [["serveur", "bi-bell-fill", "waiter", "waiterSent"], ["addition", "bi-receipt", "bill", "billSent"]].forEach(function (def) {
+        var btn = el("button", "mf-call-btn");
+        btn.type = "button";
+        btn.appendChild(icon(def[1]));
+        var label = el("span", null, t(def[2]));
+        btn.appendChild(label);
+        btn.addEventListener("click", function () { send(btn, label, def); });
+        buttons[def[0]] = { btn: btn, label: label, def: def };
+        bar.appendChild(btn);
+      });
+      host.appendChild(bar);
+    }
+
+    function send(btn, label, def) {
+      btn.disabled = true;
+      var body = new FormData();
+      body.append("kind", def[0]);
+      if (cfg.qr) body.append("qr", cfg.qr);
+      if (cfg.t) body.append("t", cfg.t);
+      fetch(cfg.call_url, { method: "POST", body: body,
+        headers: { "X-Requested-With": "fetch", "X-CSRFToken": csrf() } })
+        .then(function (r) { return r.json().then(function (d) { return { status: r.status, d: d }; }); })
+        .then(function (res) {
+          if (res.d && res.d.ok) {
+            btn.querySelector("i").className = "bi bi-check-circle-fill";
+            label.textContent = t(def[3]);
+            toast(t("sentToast"), false);
+            setTimeout(function () {       // réactivable après 60 s
+              btn.disabled = false;
+              btn.querySelector("i").className = "bi " + def[1];
+              label.textContent = t(def[2]);
+            }, 60000);
+          } else {
+            btn.disabled = false;
+            toast((res.d && res.d.error) || t("error"), true);
+            if (res.status === 409) { cfg.open = false; render(); }
+          }
+        })
+        .catch(function () { btn.disabled = false; toast(t("error"), true); });
+    }
+
+    render();
+    document.querySelectorAll(".mf-lang-btn").forEach(function (b) {
+      b.addEventListener("click", function () {
+        setTimeout(function () {
+          Object.keys(buttons).forEach(function (k) {
+            var o = buttons[k];
+            o.label.textContent = t(o.btn.disabled ? o.def[3] : o.def[2]);
+          });
+          if (!cfg.open) render();
+        }, 0);
+      });
+    });
+  }
+
+  /* ========================= Équipe (back-office) ========================= */
+  function beep() {
+    try {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      var ctx = new Ctx();
+      [660, 880, 660].forEach(function (f, i) {
+        var o = ctx.createOscillator(), g = ctx.createGain(), s = ctx.currentTime + i * 0.18;
+        o.type = "triangle"; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, s);
+        g.gain.exponentialRampToValueAtTime(0.4, s + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.16);
+        o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.18);
+      });
+      setTimeout(function () { ctx.close(); }, 1000);
+    } catch (e) { /* son bloqué tant qu'on n'a pas cliqué dans la page */ }
+  }
+
+  function initStaff() {
+    var panel = null, list = null, countEl = null, timer = null;
+    var KEY = "mf_last_call_id";
+    var lastId = null;
+    try { var s = sessionStorage.getItem(KEY); if (s !== null) lastId = parseInt(s, 10); } catch (e) {}
+
+    function ensurePanel() {
+      if (panel) return;
+      panel = el("div", "mf-calls-panel");
+      panel.setAttribute("role", "region");
+      panel.setAttribute("aria-label", "Appels des clients");
+      var head = el("div", "mf-calls-head");
+      countEl = el("span");
+      var toggle = el("button", "mf-calls-toggle");
+      toggle.type = "button";
+      toggle.setAttribute("aria-label", "Réduire");
+      toggle.appendChild(icon("bi-chevron-down"));
+      toggle.addEventListener("click", function () {
+        panel.classList.toggle("is-collapsed");
+        toggle.firstChild.className = "bi " + (panel.classList.contains("is-collapsed") ? "bi-chevron-up" : "bi-chevron-down");
+      });
+      head.appendChild(icon("bi-bell-fill mf-calls-bell")); head.appendChild(countEl); head.appendChild(toggle);
+      list = el("div", "mf-calls-list");
+      list.setAttribute("aria-live", "polite");
+      panel.appendChild(head); panel.appendChild(list);
+      document.body.appendChild(panel);
+    }
+
+    function render(calls) {
+      if (!calls.length) { if (panel) { panel.remove(); panel = null; } return; }
+      ensurePanel();
+      countEl.textContent = calls.length + " appel" + (calls.length > 1 ? "s" : "") + " en attente";
+      list.textContent = "";
+      calls.forEach(function (c) {
+        var row = el("div", "mf-call-item" + (c.kind === "addition" ? " is-bill" : ""));
+        var ic = el("div", "mf-call-icon"); ic.appendChild(icon(c.kind === "addition" ? "bi-receipt" : "bi-bell-fill"));
+        var text = el("div", "mf-call-text");
+        text.appendChild(el("strong", null, c.table));
+        text.appendChild(el("small", null, c.label + " · " + (c.minutes < 1 ? "à l'instant" : "il y a " + c.minutes + " min")));
+        var done = el("button", "btn btn-sm btn-success mf-call-done", "Traité");
+        done.type = "button";
+        done.addEventListener("click", function () {
+          done.disabled = true;
+          fetch(cfg.handle_url.replace("{id}", encodeURIComponent(c.id)), {
+            method: "POST", headers: { "X-Requested-With": "fetch", "X-CSRFToken": csrf() }
+          }).then(poll).catch(function () { done.disabled = false; });
+        });
+        row.appendChild(ic); row.appendChild(text); row.appendChild(done);
+        list.appendChild(row);
+      });
+    }
+
+    function poll() {
+      return fetch(cfg.feed_url, { cache: "no-store", headers: { "X-Requested-With": "fetch" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d) return;
+          render(d.calls || []);
+          if (lastId !== null && d.latest_id > lastId) {
+            var fresh = (d.calls || []).filter(function (c) { return c.id > lastId; });
+            if (fresh.length) {
+              beep();
+              var c = fresh[fresh.length - 1];
+              toast("🔔 " + c.table + " : " + c.label.toLowerCase(), false);
+            }
+          }
+          lastId = d.latest_id;
+          try { sessionStorage.setItem(KEY, String(lastId)); } catch (e) {}
+        })
+        .catch(function () {});
+    }
+
+    function schedule() { clearInterval(timer); timer = setInterval(poll, document.hidden ? 20000 : 5000); }
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); schedule(); });
+    poll(); schedule();
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    if (cfg.mode === "public") initPublic();
+    else if (cfg.mode === "staff") initStaff();
   });
 })();
 
@@ -7984,6 +9369,7 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
                 <i class="bi bi-qr-code me-2"></i>Codes QR</a></li>
               <li><a class="dropdown-item" href="{{ url_for('admin_appearance') }}">
                 <i class="bi bi-palette me-2"></i>Apparence &amp; logo</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_hours') }}"><i class="bi bi-clock me-2"></i>Horaires d'ouverture</a></li>
             </ul>
           </li>
 
@@ -8040,6 +9426,72 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
 {% include "_new_restaurant_modal.html" %}
 {% include "_platform_announcements.html" %}
 
+
+
+==================== templates\_composition.html ====================
+{# ==========================================================================
+   Composition des plats — inclus UNE fois dans base.html (avant </body>).
+   S'active uniquement sur le tableau de bord (édition) et le menu public
+   (affichage). Les données sont passées en JSON échappé par |tojson et
+   insérées dans la page par static/composition.js via textContent.
+   ========================================================================== #}
+{% if mf_composition %}
+<script id="mf-composition-data" type="application/json">{{ mf_composition|tojson }}</script>
+
+{% if mf_composition.mode == 'admin' %}
+<div class="modal fade" id="mf-composition-modal" tabindex="-1" aria-labelledby="mf-composition-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <form method="post" id="mf-composition-form" class="modal-content" data-mf-guard autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header border-0">
+        <h5 class="modal-title" id="mf-composition-title"><i class="bi bi-list-check me-2"></i>Composition — <span id="mf-composition-name"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <label for="mf-composition-ingredients" class="form-label small fw-semibold">Ingrédients</label>
+        <textarea id="mf-composition-ingredients" name="ingredients" class="form-control" rows="4"
+                  maxlength="2500" spellcheck="true"
+                  placeholder="Un ingrédient par ligne, ou séparés par des virgules&#10;Ex : riz, viande de bœuf, oignons, tomate, huile d'arachide"></textarea>
+        <div class="d-flex justify-content-between small text-secondary mt-1">
+          <span>Lettres, chiffres, espaces et ' - . ( ) / % &amp; uniquement.</span>
+          <span><span id="mf-composition-count">0</span> / {{ mf_composition.max_ingredients }}</span>
+        </div>
+        <div class="mf-comp-preview mt-2" id="mf-composition-preview" aria-live="polite"></div>
+
+        <fieldset class="mt-3">
+          <legend class="form-label small fw-semibold mb-1"><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i>Allergènes présents</legend>
+          <div class="mf-check-grid">
+            {% for key, label in mf_allergen_choices %}
+              <div class="form-check mf-check">
+                <input class="form-check-input" type="checkbox" name="allergens" value="{{ key }}" id="mf-al-{{ key }}">
+                <label class="form-check-label" for="mf-al-{{ key }}">{{ label }}</label>
+              </div>
+            {% endfor %}
+          </div>
+        </fieldset>
+
+        <fieldset class="mt-3">
+          <legend class="form-label small fw-semibold mb-1"><i class="bi bi-patch-check-fill me-1 text-success"></i>Mentions</legend>
+          <div class="mf-check-grid">
+            {% for key, label in mf_tag_choices %}
+              <div class="form-check mf-check">
+                <input class="form-check-input" type="checkbox" name="tags" value="{{ key }}" id="mf-tag-{{ key }}">
+                <label class="form-check-label" for="mf-tag-{{ key }}">{{ label }}</label>
+              </div>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <p class="small text-secondary mt-3 mb-0"><i class="bi bi-info-circle me-1"></i>Ces informations s'affichent sous le plat dans votre menu public. Vous êtes responsable de leur exactitude.</p>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endif %}
 
 
 ==================== templates\_form_guard.html ====================
@@ -8153,6 +9605,13 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
 {% endif %}
 
 
+==================== templates\_service.html ====================
+{# Service en salle (horaires + appel du serveur) — inclus UNE fois dans base.html, avant </body>. #}
+{% if mf_service %}
+<script id="mf-service-data" type="application/json">{{ mf_service|tojson }}</script>
+{% endif %}
+
+
 ==================== templates\_super_admin_navbar.html ====================
 {# Barre de navigation du panel super-admin (source unique pour toutes ses pages). #}
 {% set ep = request.endpoint or '' %}
@@ -8192,12 +9651,13 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
         <a class="btn btn-sm {{ 'btn-primary' if ep == 'super_admin_communication' else 'btn-outline-secondary' }}" href="{{ url_for('super_admin_communication') }}">
           <i class="bi bi-megaphone me-1"></i>Communication</a>
         <div class="dropdown">
-          <button class="btn btn-sm dropdown-toggle {{ 'btn-primary' if ep in ('super_admin_health', 'super_admin_security_log', 'super_admin_backups') else 'btn-outline-secondary' }}" type="button" data-bs-toggle="dropdown">
+          <button class="btn btn-sm dropdown-toggle {{ 'btn-primary' if ep in ('super_admin_health', 'super_admin_security_log', 'super_admin_backups', 'two_factor_manage') else 'btn-outline-secondary' }}" type="button" data-bs-toggle="dropdown">
             <i class="bi bi-activity me-1"></i>Système</button>
           <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
             <li><a class="dropdown-item" href="{{ url_for('super_admin_backups') }}"><i class="bi bi-database-check me-2"></i>Sauvegardes</a></li>
             <li><a class="dropdown-item" href="{{ url_for('super_admin_health') }}"><i class="bi bi-heart-pulse me-2"></i>Santé technique</a></li>
             <li><a class="dropdown-item" href="{{ url_for('super_admin_security_log') }}"><i class="bi bi-shield-lock me-2"></i>Journal de sécurité</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('two_factor_manage') }}"><i class="bi bi-phone me-2"></i>Double authentification</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="{{ url_for('change_password') }}"><i class="bi bi-key me-2"></i>Mot de passe</a></li>
             <li><a class="dropdown-item" href="{{ url_for('admin_logout') }}"><i class="bi bi-box-arrow-right me-2"></i>Déconnexion</a></li>
@@ -8207,6 +9667,7 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
     </div>
   </div>
 </nav>
+
 
 
 ==================== templates\account_suspended.html ====================
@@ -8703,6 +10164,116 @@ document.addEventListener("DOMContentLoaded", function () {
     </div>
   </div>
 </div>
+{% endblock %}
+
+
+==================== templates\admin_hours.html ====================
+{% extends "base.html" %}
+{% block title %}Horaires d'ouverture — {{ restaurant.name }}{% endblock %}
+{% block content %}
+{% include "_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 820px;">
+
+  <div class="card mf-section-card mb-3"><div class="card-body d-flex flex-wrap align-items-center gap-3">
+    <div class="flex-grow-1">
+      <div class="small text-secondary text-uppercase">En ce moment ({{ now_local.strftime('%H:%M') }})</div>
+      {% if status.open %}
+        <div class="fs-5 fw-bold text-success"><i class="bi bi-circle-fill me-1 small"></i>Ouvert : les clients peuvent commander</div>
+      {% elif status.reason == 'suspended' %}
+        <div class="fs-5 fw-bold text-danger"><i class="bi bi-pause-circle-fill me-1"></i>Commandes suspendues</div>
+        {% if status.message %}<div class="small text-secondary">Message aux clients : « {{ status.message }} »</div>{% endif %}
+      {% else %}
+        <div class="fs-5 fw-bold text-danger"><i class="bi bi-moon-fill me-1"></i>Fermé{% if next_text %} · {{ next_text }}{% endif %}</div>
+      {% endif %}
+    </div>
+    {% if rec and rec.suspended %}
+      <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="resume">
+        <button class="btn btn-success" type="submit"><i class="bi bi-play-circle me-1"></i>Reprendre les commandes</button></form>
+    {% else %}
+      <button class="btn btn-outline-danger" type="button" data-bs-toggle="collapse" data-bs-target="#mf-suspend">
+        <i class="bi bi-pause-circle me-1"></i>Suspendre les commandes</button>
+    {% endif %}
+  </div>
+  {% if not (rec and rec.suspended) %}
+  <div class="collapse" id="mf-suspend"><div class="card-body pt-0">
+    <form method="post" class="d-flex flex-wrap gap-2" data-mf-guard>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="suspend">
+      <input type="text" name="message" class="form-control flex-grow-1" maxlength="200" style="min-width: 220px;"
+             placeholder="Message aux clients (optionnel) : ex. Cuisine complète, reprise à 20h">
+      <button class="btn btn-danger" type="submit">Suspendre maintenant</button>
+    </form>
+    <p class="small text-secondary mt-2 mb-0">Le menu reste consultable, mais plus aucune commande ni appel n'est accepté jusqu'à la reprise.</p>
+  </div></div>
+  {% endif %}
+  </div>
+
+  <form method="post" class="card mf-section-card" data-mf-guard>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="save">
+    <div class="card-body">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <h2 class="mf-section-title fs-6 mb-0">Horaires d'ouverture</h2>
+        <div class="form-check form-switch m-0">
+          <input class="form-check-input" type="checkbox" role="switch" id="hours-enabled" name="enabled" value="1" {{ 'checked' if rec and rec.enabled }}>
+          <label class="form-check-label small fw-semibold" for="hours-enabled">Appliquer ces horaires</label>
+        </div>
+      </div>
+      <p class="small text-secondary">Désactivé : votre restaurant accepte les commandes à toute heure. Activé : en dehors de ces créneaux, le menu affiche « Fermé » et refuse les commandes. Un créneau peut passer minuit (ex. 19:00 → 02:00). Deuxième créneau optionnel (ex. midi et soir).</p>
+
+      <div class="mf-hours-grid">
+        {% for d in range(7) %}{% set s = slots[d] %}
+          <div class="mf-hours-row" data-day="{{ d }}">
+            <div class="mf-hours-day">{{ days[d] }}</div>
+            <div class="form-check m-0">
+              <input class="form-check-input mf-hours-closed" type="checkbox" name="closed_{{ d }}" value="1" id="closed-{{ d }}" {{ 'checked' if rec and rec.enabled and not s }}>
+              <label class="form-check-label small" for="closed-{{ d }}">Fermé</label>
+            </div>
+            <div class="mf-hours-slots">
+              {% for n in [1, 2] %}{% set slot = s[n - 1] if s|length >= n else None %}
+                <div class="mf-hours-slot">
+                  <input type="time" class="form-control form-control-sm" name="open_{{ d }}_{{ n }}" value="{{ slot[0] if slot else ('11:00' if n == 1 and not rec else '') }}" aria-label="{{ days[d] }} ouverture {{ n }}">
+                  <span>→</span>
+                  <input type="time" class="form-control form-control-sm" name="close_{{ d }}_{{ n }}" value="{{ slot[1] if slot else ('23:00' if n == 1 and not rec else '') }}" aria-label="{{ days[d] }} fermeture {{ n }}">
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="d-flex flex-wrap gap-2 mt-3">
+        <button class="btn btn-outline-secondary btn-sm" type="button" id="mf-hours-copy"><i class="bi bi-files me-1"></i>Copier le lundi sur tous les jours</button>
+        <button class="btn btn-primary ms-auto" type="submit"><i class="bi bi-check-lg me-1"></i>Enregistrer</button>
+      </div>
+    </div>
+  </form>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  function sync(row) {
+    var closed = row.querySelector(".mf-hours-closed").checked;
+    row.querySelectorAll('input[type="time"]').forEach(function (i) { i.disabled = closed; });
+    row.classList.toggle("is-closed", closed);
+  }
+  document.querySelectorAll(".mf-hours-row").forEach(function (row) {
+    row.querySelector(".mf-hours-closed").addEventListener("change", function () { sync(row); });
+    sync(row);
+  });
+  var copy = document.getElementById("mf-hours-copy");
+  if (copy) copy.addEventListener("click", function () {
+    var rows = document.querySelectorAll(".mf-hours-row");
+    var src = rows[0].querySelectorAll('input[type="time"]');
+    var closed = rows[0].querySelector(".mf-hours-closed").checked;
+    rows.forEach(function (row, i) {
+      if (i === 0) return;
+      row.querySelectorAll('input[type="time"]').forEach(function (inp, k) { inp.value = src[k].value; });
+      row.querySelector(".mf-hours-closed").checked = closed;
+      sync(row);
+    });
+  });
+});
+</script>
 {% endblock %}
 
 
@@ -9252,6 +10823,9 @@ document.addEventListener("DOMContentLoaded", function () {
   <link rel="stylesheet" href="{{ url_for('static', filename='forms_security.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='super_admin.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='responsive.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='composition.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='file_upload.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='service.css') }}?v=2">
 
   <style>
     :root {
@@ -9316,6 +10890,11 @@ document.addEventListener("DOMContentLoaded", function () {
   <script src="{{ url_for('static', filename='forms_security.js') }}?v=1"></script>
   <script src="{{ url_for('static', filename='responsive.js') }}?v=1"></script>
   {% block extra_scripts %}{% endblock %}
+  {% include "_composition.html" %}
+  <script src="{{ url_for('static', filename='composition.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='file_upload.js') }}?v=1"></script>
+  {% include "_service.html" %}
+  <script src="{{ url_for('static', filename='service.js') }}?v=2"></script>
 </body>
 </html>
 
@@ -11205,4 +12784,630 @@ document.addEventListener("DOMContentLoaded", function () {
 </div>
 {% endblock %}
 
+
+
+==================== templates\super_admin_two_factor.html ====================
+{% extends "base.html" %}
+{% block title %}Double authentification — Super-admin{% endblock %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 760px;">
+  <div class="card mf-section-card mb-3"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-3">Double authentification</h2>
+    <div class="d-flex justify-content-between small border-bottom py-2"><span>État</span>
+      <span class="badge mf-sa-badge-ok">Activée</span></div>
+    <div class="d-flex justify-content-between small border-bottom py-2"><span>Activée le</span>
+      <strong>{{ rec.enabled_at.strftime('%d/%m/%Y %H:%M') if rec and rec.enabled_at else '—' }} (UTC)</strong></div>
+    <div class="d-flex justify-content-between small py-2"><span>Codes de secours restants</span>
+      <strong class="{{ 'text-danger' if rec and rec.recovery_left <= 2 }}">{{ rec.recovery_left if rec else 0 }} / 10</strong></div>
+  </div></div>
+
+  <div class="row g-3">
+    <div class="col-md-6"><div class="card mf-section-card h-100"><div class="card-body">
+      <h3 class="mf-section-title fs-6 mb-2">Nouveaux codes de secours</h3>
+      <p class="small text-secondary">Les anciens codes seront invalidés.</p>
+      <form method="post" action="{{ url_for('two_factor_regenerate') }}" data-mf-guard autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="code" class="form-control mb-2 text-center" inputmode="numeric" maxlength="7"
+               autocomplete="one-time-code" placeholder="Code de l'application" required>
+        <button class="btn btn-outline-secondary w-100" type="submit">Générer</button>
+      </form>
+    </div></div></div>
+    <div class="col-md-6"><div class="card mf-section-card h-100"><div class="card-body">
+      <h3 class="mf-section-title fs-6 mb-2">Changer de téléphone</h3>
+      <p class="small text-secondary">Vous scannerez un nouveau QR code.</p>
+      <form method="post" action="{{ url_for('two_factor_reconfigure') }}" data-mf-guard autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="code" class="form-control mb-2 text-center" inputmode="numeric" maxlength="7"
+               autocomplete="one-time-code" placeholder="Code de l'application" required>
+        <input type="password" name="password" class="form-control mb-2" autocomplete="current-password"
+               placeholder="Votre mot de passe" required>
+        <button class="btn btn-outline-secondary w-100" type="submit">Continuer</button>
+      </form>
+    </div></div></div>
+  </div>
+</div>
+{% endblock %}
+
+
+==================== templates\two_factor_recovery_codes.html ====================
+{% extends "base.html" %}
+{% block title %}Codes de secours — MenuFlash Mini{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card p-2" style="max-width: 480px;">
+    <div class="card-body p-4">
+      <div class="text-center mb-3">
+        <i class="bi bi-check-circle-fill" style="font-size: 1.8rem; color: var(--mf-success);"></i>
+        <h1 class="h5 fw-bold mt-2 mb-1">{{ 'Double authentification activée' if first_time else 'Nouveaux codes de secours' }}</h1>
+      </div>
+      <div class="alert alert-warning small">
+        <strong>Notez ces codes maintenant : ils ne seront plus jamais affichés.</strong>
+        Chacun permet une seule connexion si vous perdez votre téléphone.
+        {% if not first_time %}Les anciens codes ne fonctionnent plus.{% endif %}
+      </div>
+      <div class="row g-2 mb-3" id="mf-recovery-codes">
+        {% for c in codes %}<div class="col-6"><code class="d-block text-center p-2 rounded mf-sa-soft fs-6">{{ c }}</code></div>{% endfor %}
+      </div>
+      <div class="d-flex gap-2 mb-3">
+        <button type="button" class="btn btn-outline-secondary btn-sm flex-grow-1 mf-copy-btn"
+                data-copy-text="Codes de secours MenuFlash Mini ({{ email }}) :&#10;{{ codes|join('&#10;') }}">
+          <i class="bi bi-clipboard me-1"></i>Copier</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm flex-grow-1" onclick="window.print()">
+          <i class="bi bi-printer me-1"></i>Imprimer</button>
+      </div>
+      <a href="{{ url_for('super_admin_dashboard') }}" class="btn btn-primary w-100 py-2">J'ai noté mes codes, continuer</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+
+==================== templates\two_factor_setup.html ====================
+{% extends "base.html" %}
+{% block title %}Activer la double authentification — MenuFlash Mini{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card p-2" style="max-width: 460px;">
+    <div class="card-body p-4">
+      <div class="text-center mb-3">
+        <i class="bi bi-shield-lock-fill" style="font-size: 1.8rem; color: var(--mf-accent);"></i>
+        <h1 class="h5 fw-bold mt-2 mb-1">{{ 'Changer de téléphone' if reconfigure else 'Activer la double authentification' }}</h1>
+        <p class="text-secondary small mb-0">
+          {% if reconfigure %}Scannez ce nouveau QR code avec le nouveau téléphone. L'ancien reste valable tant que vous n'avez pas confirmé.
+          {% else %}Obligatoire pour le compte super-admin : en plus du mot de passe, un code de votre téléphone sera demandé à chaque connexion.{% endif %}
+        </p>
+      </div>
+      <ol class="small ps-3 mb-3">
+        <li>Installez <strong>Google Authenticator</strong> ou <strong>Microsoft Authenticator</strong> sur votre téléphone.</li>
+        <li>Dans l'application, choisissez « Scanner un QR code » :</li>
+      </ol>
+      <div class="text-center mb-2">
+        <img src="{{ qr }}" alt="QR code de configuration" width="200" height="200" style="image-rendering: pixelated;">
+      </div>
+      <details class="small mb-3">
+        <summary>Impossible de scanner ? Saisir la clé à la main</summary>
+        <code class="d-block mt-2 user-select-all" style="letter-spacing: .05em;">{{ secret }}</code>
+      </details>
+      <form method="post" data-mf-guard autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="code" class="form-label small fw-semibold">3. Saisissez le code à 6 chiffres affiché</label>
+        <input type="text" id="code" name="code" class="form-control form-control-lg text-center mb-3"
+               inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code"
+               placeholder="123 456" required autofocus style="letter-spacing: .3em;">
+        <button type="submit" class="btn btn-primary w-100 py-2">Confirmer et activer</button>
+      </form>
+      <p class="text-center small mt-3 mb-0"><a href="{{ url_for('admin_logout') }}" class="text-secondary">Se déconnecter</a></p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+
+==================== templates\two_factor_verify.html ====================
+{% extends "base.html" %}
+{% block title %}Vérification en deux étapes — MenuFlash Mini{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card p-2">
+    <div class="card-body p-4">
+      <div class="text-center mb-4">
+        <i class="bi bi-phone-fill" style="font-size: 1.8rem; color: var(--mf-accent);"></i>
+        <h1 class="h5 fw-bold mt-2 mb-1">Vérification en deux étapes</h1>
+        <p class="text-secondary small mb-0">
+          {% if mode == 'recovery' %}Saisissez l'un de vos codes de secours ({{ recovery_left }} restant{{ 's' if recovery_left != 1 }}).
+          {% else %}Ouvrez votre application d'authentification et saisissez le code affiché.{% endif %}
+        </p>
+      </div>
+      <form method="post" data-mf-guard autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="mode" value="{{ 'recovery' if mode == 'recovery' else 'code' }}">
+        {% if mode == 'recovery' %}
+          <input type="text" name="recovery_code" class="form-control form-control-lg text-center mb-3"
+                 maxlength="12" placeholder="ABCD-EFGH" autocapitalize="characters" spellcheck="false" required autofocus>
+        {% else %}
+          <input type="text" name="code" class="form-control form-control-lg text-center mb-3"
+                 inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code"
+                 placeholder="123 456" required autofocus style="letter-spacing: .3em;">
+        {% endif %}
+        <button type="submit" class="btn btn-primary w-100 py-2">Vérifier</button>
+      </form>
+      <div class="d-flex justify-content-between small mt-3">
+        {% if mode == 'recovery' %}
+          <a href="{{ url_for('two_factor_verify') }}">Utiliser l'application</a>
+        {% else %}
+          <a href="{{ url_for('two_factor_verify', mode='recovery') }}">Téléphone perdu ? Code de secours</a>
+        {% endif %}
+        <a href="{{ url_for('admin_logout') }}" class="text-secondary">Se déconnecter</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+
+==================== two_factor.py ====================
+"""
+MenuFlash Mini — Double authentification (2FA) du super-admin.
+
+Branchement dans app.py, JUSTE APRÈS l'appel à init_super_admin(...) :
+
+    from two_factor import init_two_factor
+    init_two_factor(app, log_audit=log_audit, limiter=limiter)
+
+Fonctionnement
+--------------
+- Obligatoire pour tout compte super-admin. Au premier accès, le panel est
+  bloqué tant que la 2FA n'est pas activée (QR code à scanner avec Google
+  Authenticator, Microsoft Authenticator, Authy…).
+- Ensuite, après chaque connexion, un code à 6 chiffres est demandé avant
+  d'accéder au panel. Le mot de passe seul ne suffit plus.
+- 10 codes de secours à usage unique sont fournis à l'activation (en cas de
+  perte du téléphone). Ils sont stockés hachés : ils ne sont visibles qu'une
+  seule fois.
+- Codes TOTP standard (RFC 6238, 30 s, 6 chiffres), tolérance de ±30 s pour
+  le décalage d'horloge, et un même code ne peut jamais servir deux fois.
+- 5 codes faux de suite : déconnexion et verrouillage du compte 15 minutes.
+- La clé secrète TOTP est chiffrée en base (dérivée de FLASK_SECRET_KEY).
+- Un changement ou une réinitialisation de mot de passe redemande le code.
+- Toutes les actions sont tracées dans le journal de sécurité.
+
+Secours ultime (téléphone ET codes de secours perdus)
+-----------------------------------------------------
+Dans Render > Environment, ajouter temporairement :
+    TWO_FACTOR_EMERGENCY_RESET = admin@menuflash.com
+Se connecter : la 2FA de ce compte est supprimée (tracé dans le journal) et
+une nouvelle activation est demandée. SUPPRIMER la variable juste après.
+"""
+import base64
+import hashlib
+import hmac
+import io
+import logging
+import os
+import secrets
+import struct
+import time
+from datetime import datetime, timedelta
+from urllib.parse import quote
+
+from flask import (render_template, redirect, url_for, request, flash, session,
+                   Response)
+from flask_login import current_user, logout_user
+from werkzeug.security import generate_password_hash, check_password_hash
+
+from models import db, User, LOCKOUT_DURATION_MINUTES
+
+logger = logging.getLogger("menuflash.2fa")
+
+ISSUER = "MenuFlash Mini"
+PERIOD = 30
+DIGITS = 6
+WINDOW = 1                      # ±1 période (±30 s) de décalage d'horloge
+MAX_FAILURES = 5
+RECOVERY_CODES_COUNT = 10
+SESSION_KEY = "mf_2fa_ok"
+FAIL_KEY = "mf_2fa_fail"
+NEXT_KEY = "mf_2fa_next"
+
+# Pages accessibles avant la validation du code.
+_OPEN_ENDPOINTS = {
+    "static", "media", "admin_login", "admin_logout", "backup_cron",
+    "two_factor_setup", "two_factor_verify",
+}
+
+
+# ==========================================================================
+# Modèle
+# ==========================================================================
+class UserTwoFactor(db.Model):
+    __tablename__ = "user_two_factor"
+    user_id = db.Column(db.Integer, primary_key=True)
+    secret_enc = db.Column(db.String(400), nullable=False)
+    enabled = db.Column(db.Boolean, nullable=False, default=False)
+    enabled_at = db.Column(db.DateTime)
+    last_used_step = db.Column(db.Integer, nullable=False, default=0)
+    recovery_hashes = db.Column(db.Text, nullable=False, default="")   # séparés par \n
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def recovery_left(self):
+        return len([h for h in (self.recovery_hashes or "").split("\n") if h])
+
+
+# ==========================================================================
+# TOTP (RFC 6238) — sans dépendance externe
+# ==========================================================================
+def new_secret():
+    return base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+
+
+def _b32decode(secret):
+    pad = "=" * (-len(secret) % 8)
+    return base64.b32decode(secret.upper() + pad)
+
+
+def totp_at(secret, step):
+    digest = hmac.new(_b32decode(secret), struct.pack(">Q", step), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
+    return str(value % (10 ** DIGITS)).zfill(DIGITS)
+
+
+def current_step(now=None):
+    return int((now if now is not None else time.time()) // PERIOD)
+
+
+def match_step(secret, code, last_used_step=0, now=None):
+    """Renvoie le pas de temps correspondant au code, ou None (code faux ou déjà utilisé)."""
+    code = "".join(ch for ch in (code or "") if ch.isdigit())
+    if len(code) != DIGITS:
+        return None
+    base = current_step(now)
+    for delta in range(-WINDOW, WINDOW + 1):
+        step = base + delta
+        if step > (last_used_step or 0) and hmac.compare_digest(totp_at(secret, step), code):
+            return step
+    return None
+
+
+def provisioning_uri(secret, email):
+    label = quote(f"{ISSUER}:{email}")
+    return (f"otpauth://totp/{label}?secret={secret}&issuer={quote(ISSUER)}"
+            f"&algorithm=SHA1&digits={DIGITS}&period={PERIOD}")
+
+
+def qr_data_uri(text):
+    import qrcode
+    img = qrcode.make(text, box_size=6, border=2)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+# ==========================================================================
+# Chiffrement de la clé secrète et codes de secours
+# ==========================================================================
+def _fernet(app):
+    from cryptography.fernet import Fernet
+    raw = hashlib.sha256(b"menuflash-2fa:" + app.config["SECRET_KEY"].encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(raw))
+
+
+def encrypt_secret(app, secret):
+    return _fernet(app).encrypt(secret.encode()).decode("ascii")
+
+
+def decrypt_secret(app, token):
+    from cryptography.fernet import InvalidToken
+    try:
+        return _fernet(app).decrypt(token.encode()).decode("ascii")
+    except (InvalidToken, ValueError):
+        return None
+
+
+def new_recovery_codes():
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # sans 0/O ni 1/I
+    codes = []
+    for _ in range(RECOVERY_CODES_COUNT):
+        raw = "".join(secrets.choice(alphabet) for _ in range(8))
+        codes.append(f"{raw[:4]}-{raw[4:]}")
+    return codes
+
+
+def _normalize_recovery(code):
+    return "".join(ch for ch in (code or "").upper() if ch.isalnum())
+
+
+def hash_recovery_codes(codes):
+    return "\n".join(generate_password_hash(_normalize_recovery(c)) for c in codes)
+
+
+def consume_recovery_code(record, code):
+    """Vérifie un code de secours et le supprime s'il est valide (usage unique)."""
+    norm = _normalize_recovery(code)
+    if len(norm) != 8:
+        return False
+    hashes = [h for h in (record.recovery_hashes or "").split("\n") if h]
+    for h in hashes:
+        if check_password_hash(h, norm):
+            hashes.remove(h)
+            record.recovery_hashes = "\n".join(hashes)
+            return True
+    return False
+
+
+# ==========================================================================
+# Session
+# ==========================================================================
+def _session_token(user):
+    return f"{user.id}:{user.security_stamp}"
+
+
+def is_verified():
+    return current_user.is_authenticated and session.get(SESSION_KEY) == _session_token(current_user)
+
+
+def mark_verified(user):
+    session[SESSION_KEY] = _session_token(user)
+    session.pop(FAIL_KEY, None)
+
+
+# ==========================================================================
+# Branchement
+# ==========================================================================
+def init_two_factor(app, *, log_audit, limiter=None):
+
+    with app.app_context():
+        try:
+            UserTwoFactor.__table__.create(db.engine, checkfirst=True)
+        except Exception:
+            logger.exception("Création de la table user_two_factor impossible")
+
+    def audit(action, success=True, details=None, user=None):
+        user = user or (current_user if current_user.is_authenticated else None)
+        log_audit(action, success=success,
+                  restaurant_id=getattr(user, "restaurant_id", None),
+                  user_email=getattr(user, "email", None), details=details)
+
+    def _record(user):
+        return UserTwoFactor.query.get(user.id)
+
+    def _no_store(resp):
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        return resp
+
+    def _after_verified():
+        target = session.pop(NEXT_KEY, None)
+        if target and target.startswith("/") and not target.startswith("//"):
+            return redirect(target)
+        return redirect(url_for("super_admin_dashboard"))
+
+    # ----------------------------------------------------------------------
+    # Porte d'entrée : tout le panel est bloqué tant que le code n'est pas validé
+    # ----------------------------------------------------------------------
+    @app.before_request
+    def _two_factor_gate():
+        if not current_user.is_authenticated or not getattr(current_user, "is_super_admin", False):
+            return None
+        if (request.endpoint or "") in _OPEN_ENDPOINTS:
+            return None
+
+        emergency = os.environ.get("TWO_FACTOR_EMERGENCY_RESET", "").strip().lower()
+        if emergency and emergency == current_user.email.lower():
+            rec = _record(current_user)
+            if rec:
+                db.session.delete(rec)
+                db.session.commit()
+                audit("2fa_emergency_reset", details="2FA supprimée via TWO_FACTOR_EMERGENCY_RESET")
+                logger.warning("2FA réinitialisée en urgence pour %s : retirez la variable "
+                               "TWO_FACTOR_EMERGENCY_RESET de Render.", current_user.email)
+            session.pop(SESSION_KEY, None)
+
+        if is_verified():
+            return None
+        if request.method == "GET":
+            session[NEXT_KEY] = request.full_path.rstrip("?")
+        rec = _record(current_user)
+        if rec is None or not rec.enabled:
+            return redirect(url_for("two_factor_setup"))
+        return redirect(url_for("two_factor_verify"))
+
+    # ----------------------------------------------------------------------
+    # Activation
+    # ----------------------------------------------------------------------
+    def two_factor_setup():
+        if not current_user.is_authenticated:
+            return redirect(url_for("admin_login"))
+        if not current_user.is_super_admin:
+            return redirect(url_for("admin_dashboard"))
+        rec = _record(current_user)
+        if rec and rec.enabled and is_verified() and request.args.get("reconfigurer") != "1":
+            return redirect(url_for("two_factor_manage"))
+        if rec and rec.enabled and not is_verified():
+            return redirect(url_for("two_factor_verify"))
+
+        # Clé en attente : créée une fois, réutilisée tant que l'activation n'est pas confirmée.
+        if rec is None:
+            rec = UserTwoFactor(user_id=current_user.id, secret_enc=encrypt_secret(app, new_secret()),
+                                enabled=False)
+            db.session.add(rec)
+            db.session.commit()
+        pending = rec
+        if rec.enabled:
+            # Reconfiguration (changement de téléphone) : clé provisoire en session,
+            # l'ancienne reste valide tant que la nouvelle n'est pas confirmée.
+            if "mf_2fa_pending" not in session:
+                session["mf_2fa_pending"] = encrypt_secret(app, new_secret())
+            secret = decrypt_secret(app, session["mf_2fa_pending"])
+        else:
+            secret = decrypt_secret(app, pending.secret_enc)
+            if secret is None:
+                pending.secret_enc = encrypt_secret(app, new_secret())
+                db.session.commit()
+                secret = decrypt_secret(app, pending.secret_enc)
+
+        if request.method == "POST":
+            step = match_step(secret, request.form.get("code"))
+            if step is None:
+                audit("2fa_setup_failed", success=False, details="code d'activation incorrect")
+                flash("Code incorrect. Vérifiez l'heure de votre téléphone et saisissez le code affiché.", "error")
+                return redirect(url_for("two_factor_setup", **request.args))
+            codes = new_recovery_codes()
+            if rec.enabled:
+                rec.secret_enc = session.pop("mf_2fa_pending")
+            rec.enabled = True
+            rec.enabled_at = datetime.utcnow()
+            rec.last_used_step = step
+            rec.recovery_hashes = hash_recovery_codes(codes)
+            db.session.commit()
+            mark_verified(current_user)
+            audit("2fa_enabled", details="double authentification activée")
+            return _no_store(Response(render_template("two_factor_recovery_codes.html", codes=codes,
+                                                      email=current_user.email, first_time=True)))
+
+        grouped = " ".join(secret[i:i + 4] for i in range(0, len(secret), 4))
+        return _no_store(Response(render_template(
+            "two_factor_setup.html", qr=qr_data_uri(provisioning_uri(secret, current_user.email)),
+            secret=grouped, reconfigure=rec.enabled)))
+
+    # ----------------------------------------------------------------------
+    # Vérification après connexion
+    # ----------------------------------------------------------------------
+    def two_factor_verify():
+        if not current_user.is_authenticated:
+            return redirect(url_for("admin_login"))
+        if not current_user.is_super_admin:
+            return redirect(url_for("admin_dashboard"))
+        rec = _record(current_user)
+        if rec is None or not rec.enabled:
+            return redirect(url_for("two_factor_setup"))
+        if is_verified():
+            return _after_verified()
+
+        if request.method == "POST":
+            mode = request.form.get("mode", "code")
+            user = current_user._get_current_object()
+            ok = False
+            if mode == "recovery":
+                if consume_recovery_code(rec, request.form.get("recovery_code")):
+                    db.session.commit()
+                    ok = True
+                    audit("2fa_recovery_used", details=f"code de secours utilisé, {rec.recovery_left} restant(s)")
+                    flash(f"Code de secours accepté. Il vous en reste {rec.recovery_left}. "
+                          f"Pensez à en générer de nouveaux.", "success" if rec.recovery_left > 2 else "error")
+            else:
+                secret = decrypt_secret(app, rec.secret_enc)
+                if secret is None:
+                    flash("Impossible de lire votre clé 2FA (la clé FLASK_SECRET_KEY a changé). "
+                          "Utilisez un code de secours.", "error")
+                    return redirect(url_for("two_factor_verify", mode="recovery"))
+                step = match_step(secret, request.form.get("code"), rec.last_used_step)
+                if step is not None:
+                    rec.last_used_step = step
+                    db.session.commit()
+                    ok = True
+
+            if ok:
+                mark_verified(user)
+                audit("2fa_verified", details="mode " + mode)
+                return _after_verified()
+
+            fails = session.get(FAIL_KEY, 0) + 1
+            session[FAIL_KEY] = fails
+            audit("2fa_failed", success=False, details=f"tentative {fails}/{MAX_FAILURES} ({mode})")
+            if fails >= MAX_FAILURES:
+                user.locked_until = datetime.utcnow() + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+                db.session.commit()
+                audit("2fa_locked", success=False,
+                      details=f"compte verrouillé {LOCKOUT_DURATION_MINUTES} min après {fails} codes faux")
+                logout_user()
+                session.clear()
+                flash(f"Trop de codes incorrects : compte verrouillé {LOCKOUT_DURATION_MINUTES} minutes.", "error")
+                return redirect(url_for("admin_login"))
+            flash(f"Code incorrect ou déjà utilisé ({MAX_FAILURES - fails} essai(s) restant(s)).", "error")
+            return redirect(url_for("two_factor_verify", mode=mode))
+
+        return _no_store(Response(render_template(
+            "two_factor_verify.html", mode=request.args.get("mode", "code"),
+            recovery_left=rec.recovery_left)))
+
+    # ----------------------------------------------------------------------
+    # Gestion (panel) : statut, nouveaux codes de secours, changement de téléphone
+    # ----------------------------------------------------------------------
+    def two_factor_manage():
+        rec = _record(current_user)
+        return _no_store(Response(render_template("super_admin_two_factor.html", rec=rec)))
+
+    def two_factor_regenerate():
+        rec = _record(current_user)
+        secret = decrypt_secret(app, rec.secret_enc) if rec else None
+        step = match_step(secret, request.form.get("code"), rec.last_used_step) if secret else None
+        if step is None:
+            audit("2fa_regen_refused", success=False, details="code incorrect")
+            flash("Code incorrect : saisissez le code actuel de votre application.", "error")
+            return redirect(url_for("two_factor_manage"))
+        codes = new_recovery_codes()
+        rec.last_used_step = step
+        rec.recovery_hashes = hash_recovery_codes(codes)
+        db.session.commit()
+        audit("2fa_codes_regenerated", details="nouveaux codes de secours, les anciens sont invalidés")
+        return _no_store(Response(render_template("two_factor_recovery_codes.html", codes=codes,
+                                                  email=current_user.email, first_time=False)))
+
+    def two_factor_reconfigure():
+        rec = _record(current_user)
+        secret = decrypt_secret(app, rec.secret_enc) if rec else None
+        step = match_step(secret, request.form.get("code"), rec.last_used_step) if secret else None
+        if step is None or not current_user.check_password(request.form.get("password", "")):
+            audit("2fa_reconfig_refused", success=False, details="code ou mot de passe incorrect")
+            flash("Code ou mot de passe incorrect.", "error")
+            return redirect(url_for("two_factor_manage"))
+        rec.last_used_step = step
+        db.session.commit()
+        session.pop("mf_2fa_pending", None)
+        audit("2fa_reconfig_started", details="changement de téléphone demandé")
+        return redirect(url_for("two_factor_setup", reconfigurer=1))
+
+    # ----------------------------------------------------------------------
+    # Enregistrement des routes (+ limitation de débit)
+    # ----------------------------------------------------------------------
+    def _limited(view, rule):
+        return limiter.limit(rule, methods=["POST"])(view) if limiter is not None else view
+
+    app.add_url_rule("/admin/2fa/activer", "two_factor_setup",
+                     _limited(two_factor_setup, "10 per 15 minutes"), methods=["GET", "POST"])
+    app.add_url_rule("/admin/2fa/verifier", "two_factor_verify",
+                     _limited(two_factor_verify, "15 per 15 minutes"), methods=["GET", "POST"])
+
+    from functools import wraps
+    from flask import abort
+    from flask_login import login_required
+
+    def _super_only(view):
+        @wraps(view)
+        @login_required
+        def wrapper(*args, **kwargs):
+            if not current_user.is_super_admin:
+                abort(403)
+            return view(*args, **kwargs)
+        return wrapper
+
+    app.add_url_rule("/super-admin/double-authentification", "two_factor_manage",
+                     _super_only(two_factor_manage))
+    app.add_url_rule("/super-admin/double-authentification/codes", "two_factor_regenerate",
+                     _super_only(_limited(two_factor_regenerate, "10 per hour")), methods=["POST"])
+    app.add_url_rule("/super-admin/double-authentification/telephone", "two_factor_reconfigure",
+                     _super_only(_limited(two_factor_reconfigure, "10 per hour")), methods=["POST"])
+
+    @app.context_processor
+    def _inject_2fa():
+        try:
+            if current_user.is_authenticated and current_user.is_super_admin:
+                rec = _record(current_user)
+                return {"two_factor_enabled": bool(rec and rec.enabled)}
+        except Exception:
+            db.session.rollback()
+        return {}
 

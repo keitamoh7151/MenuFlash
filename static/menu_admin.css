@@ -1,0 +1,137 @@
+/* ==========================================================================
+   MenuFlash Mini — gestion du menu (tableau de bord du restaurateur)
+   ========================================================================== */
+
+/* ---------- Rappel « plats à compléter » ---------- */
+.mf-menu-tip {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; margin-bottom: 1rem; border-radius: 14px;
+  background: var(--mf-accent-light); color: var(--mf-accent-dark);
+}
+.mf-menu-tip.d-none { display: none !important; }
+.mf-menu-tip > i { font-size: 1.3rem; flex-shrink: 0; }
+.mf-menu-tip .small { color: var(--mf-ink-soft); }
+
+/* ---------- Barre de recherche et filtres ---------- */
+.mf-menu-toolbar { position: sticky; top: 64px; z-index: 20; }
+.mf-menu-search { position: relative; min-width: 200px; }
+.mf-menu-search > i {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--mf-ink-soft); pointer-events: none;
+}
+.mf-menu-search .form-control { padding-left: 2.2rem; border-radius: 999px; }
+
+.mf-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.mf-chip {
+  border: 1px solid var(--mf-border); background: #fff; color: var(--mf-ink);
+  border-radius: 999px; padding: 5px 12px; font-size: .82rem; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px; line-height: 1.2;
+}
+.mf-chip span {
+  background: var(--mf-bg); color: var(--mf-ink-soft);
+  border-radius: 999px; padding: 1px 7px; font-size: .74rem;
+}
+.mf-chip:hover { border-color: var(--mf-accent); }
+.mf-chip.is-active { background: var(--mf-ink); border-color: var(--mf-ink); color: #fff; }
+.mf-chip.is-active span { background: rgba(255,255,255,.18); color: #fff; }
+.mf-chip:focus-visible { outline: 2px solid var(--mf-accent); outline-offset: 2px; }
+
+/* ---------- En-tête de catégorie ---------- */
+.mf-cat-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mf-cat-toggle {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0;
+  border: 0; background: transparent; padding: 4px 6px; border-radius: 8px; color: var(--mf-ink);
+}
+.mf-cat-toggle:hover { background: var(--mf-bg); }
+.mf-cat-toggle:focus-visible { outline: 2px solid var(--mf-accent); }
+.mf-cat-toggle h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mf-cat-chevron { transition: transform .2s ease; color: var(--mf-ink-soft); font-size: .9rem; }
+.mf-cat-count {
+  background: var(--mf-bg); color: var(--mf-ink-soft); font-weight: 700;
+  font-size: .75rem; padding: 1px 8px; border-radius: 999px;
+}
+.mf-category-block.is-collapsed .mf-cat-chevron { transform: rotate(-90deg); }
+.mf-category-block .mf-cat-body { margin-top: .75rem; }
+.mf-category-block.is-collapsed .mf-cat-body { display: none; }
+/* Une recherche ou un filtre déplie temporairement toutes les catégories. */
+#categories-list.mf-filtering .mf-category-block.is-collapsed .mf-cat-body { display: block; }
+#categories-list.mf-filtering .mf-category-block.is-collapsed .mf-cat-chevron { transform: none; }
+#categories-list.mf-filtering .mf-drag-handle { visibility: hidden; }
+
+.mf-icon-btn {
+  color: var(--mf-ink-soft); border: 0; background: transparent;
+  width: 32px; height: 32px; padding: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.mf-icon-btn:hover, .mf-icon-btn[aria-expanded="true"] { background: var(--mf-accent-light); color: var(--mf-accent-dark); }
+
+.mf-paused-badge {
+  font-size: .75rem; font-weight: 700; color: var(--mf-danger);
+  background: var(--mf-danger-bg); padding: 3px 10px; border-radius: 999px;
+}
+.mf-category-paused { opacity: 1; border: 2px dashed var(--mf-danger) !important; }
+.mf-category-paused .mf-cat-body { opacity: .6; }
+
+/* ---------- Tableau des plats : colonnes alignées entre catégories ---------- */
+@media (min-width: 768px) {
+  .mf-menu-table { table-layout: fixed; width: 100%; }
+}
+.mf-menu-table thead th { font-size: .72rem; letter-spacing: .03em; border-bottom-width: 1px; }
+.mf-menu-table td { padding-top: .6rem; padding-bottom: .6rem; }
+.mf-item-info { min-width: 0; }
+.min-w-0 { min-width: 0; }
+.mf-item-name, .mf-item-desc-admin { overflow: hidden; text-overflow: ellipsis; }
+.mf-item-desc-admin {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal;
+}
+.mf-thumb, .mf-thumb-empty { width: 44px; height: 44px; flex-shrink: 0; }
+.mf-item-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.mf-item-meta:empty { display: none; }
+.mf-meta-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .72rem; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+  background: var(--mf-accent-light); color: var(--mf-accent-dark);
+}
+.mf-meta-warn { background: #FFF4DB; color: #8A6100; }
+.mf-meta-pill.d-none { display: none !important; }
+
+/* Plat épuisé : visible mais atténué. */
+tr.mf-item-row.is-soldout td:not(:nth-child(5)):not(:nth-child(6)) { opacity: .5; }
+.mf-avail-form .form-check { padding-left: 3em; min-height: 1.3em; display: flex; align-items: center; }
+.mf-avail-switch { cursor: pointer; width: 2.4em !important; height: 1.3em; margin-left: -3em !important; margin-top: 0 !important; }
+.mf-avail-switch:checked { background-color: var(--mf-success); border-color: var(--mf-success); }
+.mf-avail-label { font-weight: 600; color: var(--mf-success); cursor: pointer; user-select: none; }
+tr.is-soldout .mf-avail-label { color: var(--mf-danger); }
+
+.mf-actions-menu { min-width: 230px; font-size: .9rem; }
+.mf-actions-menu .dropdown-item { padding-top: .45rem; padding-bottom: .45rem; }
+.mf-actions-menu form { margin: 0; }
+.mf-comp-open.has-data::after {
+  content: "renseignée"; margin-left: .4rem; font-size: .7rem; font-weight: 700;
+  color: var(--mf-success); background: var(--mf-success-bg); padding: 1px 6px; border-radius: 999px;
+}
+
+/* « Afficher plus » */
+tr.mf-row-more { display: none; }
+.mf-show-more { margin-top: .5rem; }
+.mf-show-more .btn { font-weight: 600; color: var(--mf-accent-dark); background: var(--mf-bg); border: 0; }
+
+/* Catégorie vide */
+.mf-cat-empty {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
+  padding: 18px; border: 1px dashed var(--mf-border); border-radius: 12px;
+  color: var(--mf-ink-soft); font-size: .9rem;
+}
+.mf-cat-empty > i { font-size: 1.3rem; color: var(--mf-accent); }
+
+/* ---------- Téléphone ---------- */
+@media (max-width: 767.98px) {
+  .mf-menu-toolbar { position: static; }
+  .mf-menu-search { flex: 1 1 100%; }
+  .mf-chips { flex: 1 1 auto; }
+  .mf-cat-head .mf-paused-badge { order: 5; flex-basis: 100%; text-align: center; }
+  /* Sur téléphone, responsive.css transforme chaque plat en carte : la ligne
+     « épuisé » reste lisible et l'interrupteur reste bien cliquable. */
+  .mf-items-tbody > tr.mf-row-more { display: none; }
+  .mf-items-tbody > tr.d-none { display: none !important; }
+}

@@ -99,30 +99,61 @@
       bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }
 
+    // Ouvre la modale APRÈS la fermeture du menu d'actions (évite que les
+    // deux composants Bootstrap se disputent le focus).
+    function openFromMenu(trigger, id, name) {
+      var dd = trigger.closest(".dropdown");
+      var toggle = dd && dd.querySelector('[data-bs-toggle="dropdown"]');
+      var inst = toggle && bootstrap.Dropdown.getInstance(toggle);
+      if (inst && toggle.classList.contains("show")) {
+        var done = false;
+        var go = function () { if (!done) { done = true; open(id, name); } };
+        toggle.addEventListener("hidden.bs.dropdown", go, { once: true });
+        inst.hide();
+        setTimeout(go, 300);
+      } else {
+        open(id, name);
+      }
+    }
+
+    function summary(row, comp) {
+      var info = row && row.querySelector(".mf-item-meta");
+      if (!info || info.querySelector(".mf-comp-summary-pill")) return;
+      var parts = [];
+      if (comp.ingredients.length) parts.push(comp.ingredients.length + " ingrédient" + (comp.ingredients.length > 1 ? "s" : ""));
+      if (comp.allergens.length) parts.push(comp.allergens.length + " allergène" + (comp.allergens.length > 1 ? "s" : ""));
+      var pill = el("span", "mf-meta-pill mf-comp-summary-pill");
+      pill.appendChild(el("i", "bi bi-list-check"));
+      pill.appendChild(document.createTextNode(parts.join(" · ") || "Mentions renseignées"));
+      info.insertBefore(pill, info.firstChild);
+    }
+
+    var menuItems = document.querySelectorAll(".mf-comp-open[data-item-id]");
+    if (menuItems.length) {
+      // Mise en page actuelle : entrée « Composition & allergènes » du menu d'actions.
+      menuItems.forEach(function (item) {
+        var id = item.dataset.itemId, name = item.dataset.itemName || "";
+        var comp = items[id];
+        item.addEventListener("click", function (e) { e.preventDefault(); openFromMenu(item, id, name); });
+        if (comp) {
+          item.classList.add("has-data");
+          summary(item.closest("tr"), comp);
+        }
+      });
+      return;
+    }
+
+    // Ancienne mise en page : bouton ajouté à côté du crayon de chaque plat.
     document.querySelectorAll(".mf-edit-item-btn[data-item-id]").forEach(function (editBtn) {
       if (editBtn.parentElement.querySelector(".mf-comp-btn")) return;
       var id = editBtn.dataset.itemId, name = editBtn.dataset.itemName || "";
-      var comp = items[id];
-      var btn = el("button", "btn btn-sm btn-outline-secondary border-0 mf-comp-btn" + (comp ? " has-data" : ""));
+      var btn = el("button", "btn btn-sm btn-outline-secondary border-0 mf-comp-btn" + (items[id] ? " has-data" : ""));
       btn.type = "button";
       btn.title = "Composition et allergènes";
       btn.setAttribute("aria-label", "Composition et allergènes de " + name);
       btn.appendChild(el("i", "bi bi-list-check"));
       btn.addEventListener("click", function () { open(id, name); });
       editBtn.insertAdjacentElement("afterend", btn);
-
-      if (comp) {
-        var cell = editBtn.closest("tr") && editBtn.closest("tr").querySelector(".fw-semibold");
-        if (cell && !cell.parentElement.querySelector(".mf-comp-summary")) {
-          var parts = [];
-          if (comp.ingredients.length) parts.push(comp.ingredients.length + " ingrédient" + (comp.ingredients.length > 1 ? "s" : ""));
-          if (comp.allergens.length) parts.push(comp.allergens.length + " allergène" + (comp.allergens.length > 1 ? "s" : ""));
-          var s = el("div", "mf-comp-summary");
-          s.appendChild(el("i", "bi bi-list-check me-1"));
-          s.appendChild(document.createTextNode(parts.join(" · ") || "mentions renseignées"));
-          cell.parentElement.appendChild(s);
-        }
-      }
     });
   }
 

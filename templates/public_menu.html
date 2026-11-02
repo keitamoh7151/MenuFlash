@@ -16,6 +16,7 @@
 
 <script id="mf-i18n-data" type="application/json">{{ translations|tojson }}</script>
 <script id="mf-suggestions-data" type="application/json">{{ item_suggestions|tojson }}</script>
+<script id="mf-popular-data" type="application/json">{{ (popular_ids or [])|tojson }}</script>
 
 <header class="mf-hero">
   <div class="mf-lang-toggle" role="group" aria-label="Choisir la langue / Choose language">
@@ -64,12 +65,26 @@
   <input type="hidden" name="qr_id" value="{{ request.args.get('qr', '') }}">
 
   <main class="container" style="max-width: 680px; padding-bottom: 110px;">
+    {% if categories %}
+      <div class="mf-pub-search" role="search">
+        <i class="bi bi-search" aria-hidden="true"></i>
+        <input type="search" id="mf-pub-search" class="form-control" maxlength="60" autocomplete="off"
+               enterkeyhint="search" placeholder="Rechercher un plat…" aria-label="Rechercher un plat">
+        <button type="button" class="mf-pub-search-clear d-none" aria-label="Effacer la recherche"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <section id="mf-popular" class="mf-popular d-none" aria-labelledby="mf-popular-title">
+        <h2 class="mf-category-title fs-5" id="mf-popular-title"><i class="bi bi-fire me-1"></i><span>Les plus commandés</span></h2>
+        <div class="mf-popular-track" id="mf-popular-track"></div>
+      </section>
+      <p class="mf-pub-noresult d-none" id="mf-pub-noresult" role="status"></p>
+    {% endif %}
     {% for category in categories %}
-      <section id="cat-{{ category.id }}" class="pt-2" style="scroll-margin-top: 80px;">
+      <section id="cat-{{ category.id }}" class="pt-2 mf-menu-section" style="scroll-margin-top: 80px;">
         <h2 class="mf-category-title fs-5">{{ category.name }}</h2>
 
         {% for item in category.items if item.is_available %}
-          <div class="card mf-item-card hover-lift mb-3">
+          <div class="card mf-item-card hover-lift mb-3" data-mf-item="{{ item.id }}"
+               data-search="{{ item.name }} {{ item.description or '' }}">
             <div class="card-body d-flex align-items-center gap-3 flex-wrap">
               {% if item.photo_url %}
                 <img src="{{ item.photo_url }}" alt="{{ item.name }}" class="mf-item-img" loading="lazy">
