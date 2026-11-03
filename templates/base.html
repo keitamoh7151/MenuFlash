@@ -21,7 +21,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='menu_public.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='phone_field.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='takeaway.css') }}?v=1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='takeaway.css') }}?v=1">
+  
   <style>
     :root {
       --mf-accent: {{ theme_colors.accent }};
@@ -84,7 +84,7 @@
   <script src="{{ url_for('static', filename='forms_security.js') }}?v=1"></script>
   <script src="{{ url_for('static', filename='responsive.js') }}?v=1"></script>
   <script src="{{ url_for('static', filename='phone_field.js') }}?v=1"></script>
-  <script src="{{ url_for('static', filename='takeaway.js') }}?v=1"></script>
+  
   {% block extra_scripts %}{% endblock %}
   {% include "_composition.html" %}
   <script src="{{ url_for('static', filename='composition.js') }}?v=2"></script>

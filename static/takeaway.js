@@ -1,9 +1,15 @@
 /*
  * MenuFlash Mini - choix « Sur place / À emporter » sur le menu client.
  * Le serveur revalide tout : ce script ne fait que l'affichage.
+ *
+ * Protection anti-doublon : même si ce fichier est chargé plusieurs fois
+ * (balise <script> en double dans base.html, cache…), un SEUL bloc est créé.
  */
 (function () {
   "use strict";
+  if (window.__mfTakeawayLoaded) return;          // script déjà chargé
+  window.__mfTakeawayLoaded = true;
+
   var COUNTRIES = [["ML", "Mali (+223)"], ["SN", "Sénégal (+221)"], ["CI", "Côte d'Ivoire (+225)"],
     ["BF", "Burkina Faso (+226)"], ["GN", "Guinée (+224)"], ["NE", "Niger (+227)"], ["MR", "Mauritanie (+222)"],
     ["BJ", "Bénin (+229)"], ["TG", "Togo (+228)"], ["CM", "Cameroun (+237)"], ["MA", "Maroc (+212)"],
@@ -14,6 +20,8 @@
     var form = document.getElementById("order-form");
     var slug = form && form.getAttribute("data-slug");
     if (!form || !slug) return;
+    if (form.dataset.mfTakeaway) return;           // déjà initialisé
+    form.dataset.mfTakeaway = "loading";
     fetch("/m/" + encodeURIComponent(slug) + "/a-emporter/config.json", { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (c) { if (c && (c.enabled || c.paused)) build(form, c); })
@@ -21,6 +29,10 @@
   }
 
   function build(form, c) {
+    // Dernière sécurité : si un bloc existe déjà dans le formulaire, on ne recrée rien.
+    if (form.querySelector(".mf-fulfillment")) return;
+    form.dataset.mfTakeaway = "ready";
+
     var notes = document.getElementById("notes");
     var anchor = notes ? notes.parentNode : null;
     if (!anchor || !anchor.parentNode) return;
@@ -65,7 +77,7 @@
       var take = box.querySelector("[name=fulfillment]:checked").value === "takeaway";
       fields.classList.toggle("d-none", !take);
       wrap.classList.toggle("d-none", !(take && when.value === "scheduled"));
-      // En mode « sur place », ces champs ne doivent pas être envoyés.
+      // En mode « sur place », ces champs ne sont ni visibles ni envoyés.
       fields.querySelectorAll("input, select").forEach(function (el) { el.disabled = !take; });
     }
     box.addEventListener("change", refresh);
