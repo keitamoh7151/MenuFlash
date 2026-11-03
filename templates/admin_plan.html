@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Ma formule - {{ restaurant.name }}{% endblock %}
+{% block content %}{% include "_admin_navbar.html" %}
+<div class="container py-4" style="max-width:900px">
+  <div class="d-flex justify-content-between align-items-start gap-3 mb-4">
+    <div><h1 class="h4 fw-bold mb-1">Ma formule</h1><p class="text-secondary mb-0">Les données restent conservées si une fonctionnalité devient inactive.</p></div>
+    <span class="badge rounded-pill text-bg-primary fs-6">{{ current_plan_label }}</span>
+  </div>
+  {% if restaurant.subscription_plan == 'trial' and effective == 'pro' %}
+    <div class="alert alert-info"><i class="bi bi-stars me-2"></i>Pendant l'essai, toutes les fonctionnalités Pro sont disponibles jusqu'au {{ restaurant.subscription_active_until.strftime('%d/%m/%Y') }}.</div>
+  {% endif %}
+  <div class="row g-3">
+    {% for key, meta in PLAN_FEATURES.items() %}
+      <div class="col-md-6"><div class="card h-100 mf-section-card"><div class="card-body d-flex justify-content-between gap-3">
+        <div><div class="fw-semibold">{{ meta.label }}</div>
+          {% if meta.kind == 'int' %}<div class="small text-secondary">Limite actuelle : {{ values[key] }}</div>
+          {% elif values[key] %}<div class="small text-success">Disponible</div>
+          {% else %}<div class="small text-secondary">Disponible avec Pro</div>{% endif %}
+        </div>
+        {% if meta.kind == 'bool' %}<i class="bi {{ 'bi-check-circle-fill text-success' if values[key] else 'bi-lock-fill text-secondary' }} fs-4"></i>
+        {% else %}<span class="badge text-bg-light align-self-start">{{ values[key] }}</span>{% endif %}
+      </div></div></div>
+    {% endfor %}
+  </div>
+  {% if effective != 'pro' %}<div class="card border-primary mt-4"><div class="card-body"><h2 class="h6 fw-bold">Passer à Pro</h2><p class="small text-secondary mb-0">Contactez MenuFlash pour activer les commandes à emporter, les statistiques avancées et augmenter les limites.</p></div></div>{% endif %}
+</div>{% endblock %}

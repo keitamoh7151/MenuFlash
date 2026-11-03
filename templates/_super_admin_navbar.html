@@ -25,6 +25,8 @@
           <i class="bi bi-speedometer2 me-1"></i>Pilotage</a>
         <a class="btn btn-sm {{ 'btn-primary' if ep in ('super_admin_clients', 'super_admin_restaurant_detail') else 'btn-outline-secondary' }}" href="{{ url_for('super_admin_clients') }}">
           <i class="bi bi-shop me-1"></i>Clients</a>
+        <a class="btn btn-sm {{ 'btn-primary' if ep in ('super_admin_plans', 'super_admin_plan_override') else 'btn-outline-secondary' }}" href="{{ url_for('super_admin_plans') }}">
+          <i class="bi bi-toggles me-1"></i>Formules</a>
         <div class="dropdown">
           <button class="btn btn-sm dropdown-toggle {{ 'btn-primary' if ep in ('super_admin_finances', 'super_admin_reminders') else 'btn-outline-secondary' }}" type="button" data-bs-toggle="dropdown">
             <i class="bi bi-cash-coin me-1"></i>Finances</button>

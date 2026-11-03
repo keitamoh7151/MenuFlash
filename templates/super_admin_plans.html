@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Formules et fonctionnalités{% endblock %}
+{% block content %}{% include "_super_admin_navbar.html" %}
+<div class="container-fluid py-4 px-lg-4">
+  <div class="mb-4"><h1 class="h4 fw-bold mb-1">Formules et fonctionnalités</h1><p class="text-secondary mb-0">Les changements s'appliquent immédiatement. Les essais actifs utilisent les droits Pro.</p></div>
+  <form method="post" class="card mf-section-card mb-4"><div class="card-body">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Fonctionnalité</th><th class="text-center">Basic</th><th class="text-center">Pro</th></tr></thead><tbody>
+    {% for key, meta in features.items() %}<tr><td><strong>{{ meta.label }}</strong><div class="small text-secondary"><code>{{ key }}</code></div></td>
+      {% for plan in ['basic','pro'] %}<td class="text-center">
+        {% if meta.kind == 'bool' %}<div class="form-check form-switch d-inline-block"><input class="form-check-input" type="checkbox" name="{{ plan }}_{{ key }}" {{ 'checked' if rules.get((plan,key),meta[plan]) == '1' }}></div>
+        {% else %}<input class="form-control form-control-sm mx-auto" style="max-width:120px" type="number" min="0" max="10000" name="{{ plan }}_{{ key }}" value="{{ rules.get((plan,key),meta[plan]) }}">{% endif %}
+      </td>{% endfor %}</tr>{% endfor %}
+    </tbody></table></div><button class="btn btn-primary" type="submit"><i class="bi bi-check-lg me-1"></i>Enregistrer les formules</button>
+  </div></form>
+
+  <div class="card mf-section-card mb-4"><div class="card-body"><h2 class="h6 fw-bold">Accorder une exception à un restaurant</h2>
+    <p class="small text-secondary">Exemple : offrir « À emporter » pendant 30 jours à un restaurant Basic.</p>
+    <form method="post" action="{{ url_for('super_admin_plan_override') }}" class="row g-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="col-lg-4"><select class="form-select" name="restaurant_id" required><option value="">Restaurant…</option>{% for r in restaurants %}<option value="{{ r.id }}">{{ r.name }} · {{ r.subscription_plan|capitalize }}</option>{% endfor %}</select></div>
+      <div class="col-lg-3"><select class="form-select" name="feature_key" id="override-feature" required><option value="">Fonctionnalité…</option>{% for key,meta in features.items() %}<option value="{{ key }}" data-kind="{{ meta.kind }}">{{ meta.label }}</option>{% endfor %}</select></div>
+      <div class="col-lg-2"><input class="form-control" name="value" placeholder="1=oui, 0=non ou limite" required></div>
+      <div class="col-lg-2"><input class="form-control" type="date" name="expires_at" title="Expiration facultative"></div>
+      <div class="col-lg-1"><button class="btn btn-primary w-100" type="submit">OK</button></div>
+    </form>
+  </div></div>
+
+  <div class="card mf-section-card"><div class="card-body"><h2 class="h6 fw-bold">Exceptions existantes</h2>
+    <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Restaurant</th><th>Fonction</th><th>Valeur</th><th>Expiration</th><th></th></tr></thead><tbody>
+    {% for o in overrides %}{% set r = restaurants|selectattr('id','equalto',o.restaurant_id)|first %}<tr class="{{ 'text-secondary' if not o.active }}"><td>{{ r.name if r else '#' ~ o.restaurant_id }}</td><td>{{ features.get(o.feature_key,{}).get('label',o.feature_key) }}</td><td>{{ o.value }}</td><td>{{ o.expires_at.strftime('%d/%m/%Y') if o.expires_at else 'Permanente' }}{% if not o.active %} · expirée{% endif %}</td><td>
+      <form method="post" action="{{ url_for('super_admin_plan_override') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="restaurant_id" value="{{ o.restaurant_id }}"><input type="hidden" name="feature_key" value="{{ o.feature_key }}"><input type="hidden" name="action" value="delete"><button class="btn btn-sm btn-outline-danger" type="submit">Supprimer</button></form>
+    </td></tr>{% else %}<tr><td colspan="5" class="text-secondary">Aucune exception.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div></div>
+</div>{% endblock %}

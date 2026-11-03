@@ -75,7 +75,7 @@
                 <i class="bi bi-palette me-2"></i>Apparence &amp; logo</a></li>
               <li><a class="dropdown-item" href="{{ url_for('admin_hours') }}"><i class="bi bi-clock me-2"></i>Horaires d'ouverture</a></li>
               <li><a class="dropdown-item" href="{{ url_for('admin_profile') }}"><i class="bi bi-person-vcard me-2"></i>Profil du restaurant</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('admin_takeaway_settings') }}"><i class="bi bi-bag-check me-2"></i>À emporter</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('admin_takeaway_settings') }}"><i class="bi bi-bag-check me-2"></i>À emporter{% if restaurant is defined and not plan_has(restaurant, 'takeaway') %} <i class="bi bi-lock-fill ms-1 small"></i>{% endif %}</a></li>
 </ul>
           </li>
 
@@ -85,11 +85,14 @@
             </button>
             <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
               <li><a class="dropdown-item" href="{{ url_for('admin_statistics') }}">
-                <i class="bi bi-graph-up me-2"></i>Statistiques</a></li>
+                <i class="bi bi-graph-up me-2"></i>Statistiques{% if restaurant is defined and not plan_has(restaurant, 'advanced_stats') %} <i class="bi bi-lock-fill ms-1 small"></i>{% endif %}</a></li>
               <li><a class="dropdown-item" href="{{ url_for('admin_team') }}">
                 <i class="bi bi-people me-2"></i>Équipe</a></li>
               <li><a class="dropdown-item" href="{{ url_for('admin_history') }}">
                 <i class="bi bi-clock-history me-2"></i>Historique</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_plan') }}">
+                <i class="bi bi-gem me-2"></i>Ma formule <span class="badge text-bg-primary ms-1">{{ current_plan_label }}</span></a></li>
             </ul>
           </li>
 

@@ -2071,6 +2071,10 @@ from takeaway import init_takeaway
 init_takeaway(app, owner_required=owner_required, active_restaurant=active_restaurant,
               order_hooks=ORDER_CREATED_HOOKS)
 
+from plans import init_plans
+init_plans(app, super_admin_required=super_admin_required,
+           active_restaurant=active_restaurant, log_audit=log_audit)
+
 
 if __name__ == "__main__":
     with app.app_context():
