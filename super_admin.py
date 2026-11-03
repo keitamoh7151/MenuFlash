@@ -640,8 +640,8 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
                 send_password_reset_email(o)
                 sent += 1
             audit("sa_reset_link_sent", r.id, f"{sent} lien(s)")
-            flash(f"Lien de réinitialisation envoyé à {sent} gestionnaire(s) "
-                  f"(visible dans les logs Render tant que le SMTP n'est pas configuré).", "success")
+
+            flash(f"Lien de réinitialisation envoyé par email à {sent} gestionnaire(s).", "success")
 
         elif action == "force_logout":
             users = User.query.filter_by(restaurant_id=r.id).all()
@@ -1121,7 +1121,8 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
         audit("sa_bulk_email", details=f"« {subject} » -> {len(emails)} destinataire(s) ({target})")
         msg = f"Email envoyé à {len(emails)} gestionnaire(s)."
         if not is_mail_configured(app):
-            msg += " Attention : SMTP non configuré, les emails sont seulement écrits dans les logs."
+            msg += (" Attention : aucun service d'envoi n'est configuré (BREVO_API_KEY manquante), "
+                    "les emails sont seulement écrits dans les logs.")
         flash(msg, "success")
         return redirect(url_for("super_admin_communication"))
 
@@ -1182,7 +1183,9 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
             "Branche": os.environ.get("RENDER_GIT_BRANCH") or "—",
             "Service": os.environ.get("RENDER_SERVICE_NAME") or "local",
             "Démarré le": APP_STARTED_AT.strftime("%d/%m/%Y %H:%M") + " (UTC)",
-            "Envoi d'emails (SMTP)": "configuré" if is_mail_configured(app) else "NON configuré",
+                        "Envoi d'emails": ("Brevo (API)" if app.config.get("BREVO_API_KEY")
+                               else "SMTP" if app.config.get("MAIL_SERVER")
+                               else "NON configuré"),
             "HTTPS forcé": "oui" if os.environ.get("FORCE_HTTPS", "").lower() == "true" else "non",
             "Mode maintenance": "ACTIF" if get_setting("maintenance_on") == "1" else "désactivé",
         }
