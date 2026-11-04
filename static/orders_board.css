@@ -153,3 +153,13 @@ body.ob-kitchen .ob-col-head { font-size: 1.1rem; padding: 14px 16px; }
 .ob-print-frame { position: fixed; right: 0; bottom: 0; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; }
 body.ob-kitchen .ob-print { min-height: 52px; width: 52px; }
 body.ob-kitchen .ob-tk-line { font-size: 1rem; }
+
+
+
+
+/* ---------- Réglages du son ---------- */
+.ob-sound-wrap { display: inline-flex; align-items: stretch; gap: 4px; }
+.ob-sound-settings { display: inline-flex; align-items: center; }
+.ob-sound-panel { width: min(340px, calc(100vw - 24px)); }
+.ob-sound-tests { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ob-sound-tests .btn { font-size: .78rem; white-space: normal; }

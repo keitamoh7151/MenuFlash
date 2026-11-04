@@ -114,6 +114,7 @@
 
   /* ========================= Équipe (back-office) ========================= */
   function beep() {
+    if (window.MFSound) { window.MFSound.play("call"); return; }   // sons communs (sounds.js)
     try {
       var Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
@@ -212,3 +213,5 @@
     else if (cfg.mode === "staff") initStaff();
   });
 })();
+
+

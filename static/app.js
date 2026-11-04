@@ -55,28 +55,9 @@
   }
   window.MFShowToast = showToast;
 
-  function playNotificationSound() {
-    try {
-      var AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      var ctx = new AudioCtx();
-      var notes = [880, 1046.5];
-      notes.forEach(function (freq, i) {
-        var osc = ctx.createOscillator();
-        var gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.value = freq;
-        var startTime = ctx.currentTime + i * 0.16;
-        gain.gain.setValueAtTime(0.0001, startTime);
-        gain.gain.exponentialRampToValueAtTime(0.35, startTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.32);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(startTime);
-        osc.stop(startTime + 0.35);
-      });
-      setTimeout(function () { ctx.close(); }, 900);
-    } catch (e) { /* audio non disponible, tant pis */ }
+  // Sons de l'équipe : voir static/sounds.js (cloche forte et agréable, volume réglable).
+  function playNotificationSound(kind) {
+    if (window.MFSound) window.MFSound.play(kind || "new_order");
   }
 
   function applyThemeVars(colors) {
@@ -1196,10 +1177,11 @@
           showToast("🆕 Nouvelle commande reçue" + tableInfo + " !", false);
           if (kanbanRefreshFn) kanbanRefreshFn();
         } else if (payload.type === "order_updated") {
-          playNotificationSound();
+          playNotificationSound("updated");
           showToast("✏️ Une commande a été mise à jour" + tableInfo + ".", false);
           if (kanbanRefreshFn) kanbanRefreshFn();
         } else if (payload.type === "order_cancelled") {
+          playNotificationSound("cancelled");
           showToast("🚫 Commande annulée par le client" + tableInfo + ".", false);
           var orderId = payload.data && payload.data.id;
           if (orderId && window.MFKanbanRefreshWithCancelAnimation) {

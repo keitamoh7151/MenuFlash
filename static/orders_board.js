@@ -70,28 +70,57 @@
       soundBtn.querySelector("span").textContent = on ? "Son activé" : "Activer le son";
       soundBtn.title = on ? "Cliquez pour tester le son" : "Le navigateur bloque le son tant que vous n'avez pas touché la page";
     }
-    function beep() {
-      try {
-        var Ctx = window.AudioContext || window.webkitAudioContext;
-        if (!Ctx) return;
-        var ctx = new Ctx();
-        [880, 1046.5].forEach(function (f, i) {
-          var o = ctx.createOscillator(), g = ctx.createGain(), s = ctx.currentTime + i * 0.16;
-          o.type = "sine"; o.frequency.value = f;
-          g.gain.setValueAtTime(0.0001, s);
-          g.gain.exponentialRampToValueAtTime(0.35, s + 0.02);
-          g.gain.exponentialRampToValueAtTime(0.0001, s + 0.32);
-          o.connect(g); g.connect(ctx.destination); o.start(s); o.stop(s + 0.35);
-        });
-        setTimeout(function () { ctx.close(); }, 900);
-      } catch (e) { /* audio indisponible */ }
+    function beep(kind) {
+      if (window.MFSound) window.MFSound.play(kind || "new_order");   // sons communs (sounds.js)
     }
     soundBtn.addEventListener("click", function () {
       soundBtn.dataset.on = "1";
-      beep();
+      beep("new_order");
       renderSound();
       toast("Son activé : vous entendrez ce signal à chaque nouvelle commande.", false);
     });
+
+    /* ---- Réglages du son (propres à cet appareil) : volume et rappel ---- */
+    var REMIND_KEY = "mf_sound_reminder";
+    var REMIND_EVERY_MS = 45000;          // rappel toutes les 45 s…
+    var REMIND_AFTER_MIN = 1;             // …pour une commande « Nouvelle » depuis au moins 1 min
+    var REMIND_MAX_MIN = 15;              // on arrête de rappeler une commande après 15 min
+    var reminderOn = true;
+    try { reminderOn = localStorage.getItem(REMIND_KEY) !== "0"; } catch (e) {}
+
+    document.querySelectorAll('input[name="ob-volume"]').forEach(function (r) {
+      var saved = "fort";                 // sounds.js est chargé après ce script : on lit le réglage directement
+      try { saved = localStorage.getItem("mf_sound_volume") || "fort"; } catch (e) {}
+      r.checked = r.value === saved;
+      r.addEventListener("change", function () {
+        if (!r.checked || !window.MFSound) return;
+        window.MFSound.setLevel(r.value);
+        soundBtn.dataset.on = "1"; renderSound();
+        beep("new_order");                // aperçu immédiat du volume choisi
+      });
+    });
+    var remindSwitch = document.getElementById("ob-reminder");
+    if (remindSwitch) {
+      remindSwitch.checked = reminderOn;
+      remindSwitch.addEventListener("change", function () {
+        reminderOn = remindSwitch.checked;
+        try { localStorage.setItem(REMIND_KEY, reminderOn ? "1" : "0"); } catch (e) {}
+      });
+    }
+    document.querySelectorAll("[data-ob-sound-test]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        soundBtn.dataset.on = "1"; renderSound();
+        beep(b.getAttribute("data-ob-sound-test"));
+      });
+    });
+    // Rappel sonore tant qu'une nouvelle commande n'est pas prise en charge.
+    setInterval(function () {
+      if (!reminderOn || !soundAllowed()) return;
+      var waiting = ((lastData && lastData.orders) || []).some(function (o) {
+        return o.status === "nouvelle" && o.elapsed >= REMIND_AFTER_MIN && o.elapsed <= REMIND_MAX_MIN;
+      });
+      if (waiting) beep("reminder");
+    }, REMIND_EVERY_MS);
     document.addEventListener("pointerdown", function () { setTimeout(renderSound, 0); }, { passive: true });
     document.addEventListener("keydown", function () { setTimeout(renderSound, 0); });
     renderSound();
@@ -521,5 +550,7 @@
     setView(root.dataset.startView === "history" ? "history" : "board");
   });
 })();
+
+
 
 

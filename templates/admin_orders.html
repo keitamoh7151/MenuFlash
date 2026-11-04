@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Commandes — {{ restaurant.name }}{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='orders_board.css') }}?v=2">
+<link rel="stylesheet" href="{{ url_for('static', filename='orders_board.css') }}?v=3">
 {% endblock %}
 {% block content %}
 {% include "_admin_navbar.html" %}
@@ -29,9 +29,41 @@
           <span class="mf-live-dot"></span> En direct
         </span>
       {% endif %}
-      <button type="button" class="ob-sound is-off" id="ob-sound" aria-live="polite">
-        <i class="bi bi-volume-mute-fill"></i><span>Activer le son</span>
-      </button>
+      <div class="ob-sound-wrap">
+        <button type="button" class="ob-sound is-off" id="ob-sound" aria-live="polite">
+          <i class="bi bi-volume-mute-fill"></i><span>Activer le son</span>
+        </button>
+        <div class="dropdown">
+          <button type="button" class="btn btn-sm btn-outline-secondary ob-sound-settings" data-bs-toggle="dropdown"
+                  data-bs-auto-close="outside" aria-expanded="false" aria-label="Réglages du son" title="Réglages du son">
+            <i class="bi bi-sliders"></i>
+          </button>
+          <div class="dropdown-menu dropdown-menu-end p-3 ob-sound-panel">
+            <div class="small fw-semibold mb-2">Volume des notifications</div>
+            <div class="btn-group w-100 mb-1" role="group" aria-label="Volume">
+              <input type="radio" class="btn-check" name="ob-volume" id="ob-vol-normal" value="normal">
+              <label class="btn btn-sm btn-outline-secondary" for="ob-vol-normal">Normal</label>
+              <input type="radio" class="btn-check" name="ob-volume" id="ob-vol-fort" value="fort" checked>
+              <label class="btn btn-sm btn-outline-secondary" for="ob-vol-fort">Fort</label>
+              <input type="radio" class="btn-check" name="ob-volume" id="ob-vol-tres" value="tres_fort">
+              <label class="btn btn-sm btn-outline-secondary" for="ob-vol-tres">Très fort</label>
+            </div>
+            <p class="small text-secondary mb-3">Montez aussi le volume de l'appareil. Pour une grande cuisine, branchez une enceinte Bluetooth.</p>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="ob-reminder" checked>
+              <label class="form-check-label small fw-semibold" for="ob-reminder">Rappel sonore toutes les 45 s tant qu'une nouvelle commande n'est pas prise en charge</label>
+            </div>
+            <div class="small fw-semibold mb-2">Écouter les sons</div>
+            <div class="ob-sound-tests">
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-ob-sound-test="new_order"><i class="bi bi-bell me-1"></i>Nouvelle commande</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-ob-sound-test="updated"><i class="bi bi-plus-circle me-1"></i>Plats ajoutés</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-ob-sound-test="cancelled"><i class="bi bi-x-circle me-1"></i>Annulation</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-ob-sound-test="call"><i class="bi bi-person-raised-hand me-1"></i>Appel d'une table</button>
+            </div>
+            <p class="small text-secondary mt-2 mb-0">Réglages propres à <strong>cet appareil</strong>.</p>
+          </div>
+        </div>
+      </div>
       <div class="dropdown">
         <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle ob-print-menu" id="ob-print-menu"
                 data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
@@ -116,7 +148,9 @@
 </div>
 {% endblock %}
 {% block extra_scripts %}
-<script src="{{ url_for('static', filename='orders_board.js') }}?v=2"></script>
+<script src="{{ url_for('static', filename='orders_board.js') }}?v=3"></script>
 {% endblock %}
+
+
 
 
