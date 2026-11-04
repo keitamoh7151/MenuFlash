@@ -7,15 +7,12 @@
  * Parcours : panier -> récapitulatif -> « Continuer » -> cette fenêtre
  * (prénom, téléphone, heure de retrait, email facultatif) -> « Confirmer la
  * commande » -> page de suivi avec le numéro et le code de retrait.
- *
- * Les champs sont dans le formulaire de commande (#order-form) : ils partent
- * avec la commande. Ce script ne fait que guider le client ; le serveur
- * (takeaway.py) revérifie tout.
+ * Le serveur (takeaway.py) revérifie tout.
  */
 (function () {
   "use strict";
 
-  if (window.__mfTakeawayLoaded) return;   // protection si le script est chargé deux fois
+  if (window.__mfTakeawayLoaded) return;
   window.__mfTakeawayLoaded = true;
 
   var NAME_RE = /^\p{L}+(?:[ '’\-]\p{L}+)*$/u;
@@ -41,10 +38,9 @@
     var spinnerEl = confirmBtn.querySelector(".spinner-border");
     var coarse = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
 
-    var send = null;      // fonction d'envoi fournie par app.js
+    var send = null;
     var busy = false;
 
-    /* ------------------------- Heure de retrait ------------------------- */
     function pickupType() {
       var checked = modalEl.querySelector('input[name="pickup_type"]:checked');
       return checked ? checked.value : "";
@@ -53,7 +49,7 @@
       if (!slotSelect) return;
       var scheduled = pickupType() === "scheduled";
       slotSelect.classList.toggle("d-none", !scheduled);
-      slotSelect.disabled = !scheduled;       // désactivé = non envoyé
+      slotSelect.disabled = !scheduled;
       slotSelect.required = scheduled;
       if (scheduled && !coarse) slotSelect.focus();
     }
@@ -62,7 +58,6 @@
     });
     syncPickup();
 
-    /* ----------------------------- Erreurs ----------------------------- */
     function showError(message) {
       errorBox.textContent = message || t("tk_error_generic", "Une erreur est survenue. Réessayez.");
       errorBox.classList.remove("d-none");
@@ -73,7 +68,6 @@
       errorBox.classList.add("d-none");
     }
 
-    /* --------------------------- Vérifications --------------------------- */
     nameInput.addEventListener("input", function () { nameInput.setCustomValidity(""); });
     if (slotSelect) slotSelect.addEventListener("change", function () { slotSelect.setCustomValidity(""); });
 
@@ -83,7 +77,6 @@
       nameInput.setCustomValidity(name.length >= 2 && NAME_RE.test(name) ? "" : t("tk_err_name", "Indiquez votre prénom (lettres uniquement)."));
       if (!nameInput.reportValidity()) return false;
 
-      // phone_field.js signale déjà un numéro invalide pour le pays choisi.
       if (!phoneInput.value.trim()) phoneInput.setCustomValidity(t("tk_err_phone", "Indiquez votre numéro de téléphone."));
       if (!phoneInput.reportValidity()) {
         if (!phoneInput.value.trim()) phoneInput.setCustomValidity("");
@@ -99,7 +92,6 @@
       return emailInput.reportValidity();
     }
 
-    /* ------------------------------ Envoi ------------------------------ */
     function setBusy(state) {
       busy = state;
       confirmBtn.disabled = state;
@@ -114,7 +106,7 @@
       if (!validate()) return;
       setBusy(true);
       send().then(function (res) {
-        if (res && res.ok) return;           // app.js ouvre la page de suivi
+        if (res && res.ok) return;
         setBusy(false);
         if (res && res.handled) { modal.hide(); return; }
         showError(res && res.error);
@@ -122,20 +114,17 @@
     }
 
     confirmBtn.addEventListener("click", submit);
-    // Entrée dans un champ = confirmer (et jamais un envoi classique du formulaire).
     modalEl.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && e.target.tagName === "INPUT") {
         e.preventDefault();
         submit();
       }
     });
-    // Pas de fermeture pendant l'envoi.
     modalEl.addEventListener("hide.bs.modal", function (e) { if (busy) e.preventDefault(); });
     modalEl.addEventListener("shown.bs.modal", function () {
       if (!coarse && !nameInput.value) nameInput.focus();
     });
 
-    /* ------------------------- API pour app.js ------------------------- */
     window.MFTakeaway = {
       active: true,
       open: function (sendFn, summary) {

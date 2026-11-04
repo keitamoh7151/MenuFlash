@@ -128,6 +128,13 @@
         el.setAttribute("placeholder", dict[lang][key]);
       }
     });
+    document.querySelectorAll("[data-i18n-label]").forEach(function (el) {
+      var key = el.getAttribute("data-i18n-label");
+      var dict = window.MF_I18N_DICT;
+      if (dict && dict[lang] && dict[lang][key] != null) {
+        el.setAttribute("label", dict[lang][key]);
+      }
+    });
     document.querySelectorAll(".mf-lang-btn").forEach(function (btn) {
       btn.classList.toggle("active", btn.dataset.lang === lang);
     });
@@ -503,73 +510,112 @@
       });
     }
 
+    /* --------------------------------------------------------------
+       Envoi de la commande.
+       - QR code d'une table : récapitulatif -> « Confirmer l'envoi ».
+       - Lien général (à emporter) : récapitulatif -> « Continuer » ->
+         fenêtre « À emporter » (takeaway.js) -> « Confirmer la commande ».
+       - Ajout à une commande existante : toujours directement.
+       -------------------------------------------------------------- */
+    function isTakeawayFlow() {
+      return !addModeOrderId && !!(window.MFTakeaway && window.MFTakeaway.active);
+    }
+
+    function recapConfirmText() {
+      return isTakeawayFlow()
+        ? (translateKey("cart_continue") || "Continuer")
+        : (translateKey("cart_submit_confirm") || "Confirmer l'envoi");
+    }
+
+    function setRecapBusy(busy) {
+      var labelEl = recapConfirmBtn.querySelector(".confirm-label");
+      var spinnerEl = recapConfirmBtn.querySelector(".spinner-border");
+      recapConfirmBtn.disabled = busy;
+      if (labelEl) labelEl.textContent = busy ? (translateKey("cart_sending") || "Envoi…") : recapConfirmText();
+      if (spinnerEl) spinnerEl.classList.toggle("d-none", !busy);
+    }
+
+    // Envoie la commande. Renvoie une promesse { ok, error, handled }.
+    // Dans le parcours « à emporter », les erreurs sont affichées dans la fenêtre.
+    function sendOrder() {
+      var takeaway = isTakeawayFlow();
+      var targetUrl = addModeOrderId
+        ? "/m/" + slug + "/commande/" + addModeOrderId + "/ajouter"
+        : form.action;
+
+      return fetch(targetUrl, {
+        method: "POST",
+        headers: { "X-Requested-With": "fetch" },
+        body: new FormData(form)
+      })
+        .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+        .then(function (res) {
+          var data = res.data || {};
+          if (!data.ok) {
+            if (data.locked) {
+              showToast(data.error, true);
+              exitAddMode();
+              refreshMyOrders();
+              return { ok: false, handled: true, error: data.error };
+            }
+            var message = data.error || "Une erreur est survenue.";
+            if (!takeaway) showToast(message, true);
+            return { ok: false, error: message };
+          }
+
+          if (addModeOrderId) {
+            showToast("Plats ajoutés à la commande #" + data.id + ".", false);
+            exitAddMode();
+          } else {
+            addStoredId(data.id);
+            resetCart();
+            if (takeaway && data.detail_url) {
+              window.location.href = data.detail_url;
+              return { ok: true };
+            }
+            showToast("Commande envoyée ! Suivez-la dans « Mes commandes ».", false);
+          }
+
+          refreshMyOrders();
+          var offcanvasEl = document.getElementById("my-orders-offcanvas");
+          if (offcanvasEl && typeof bootstrap !== "undefined") {
+            bootstrap.Offcanvas.getOrCreateInstance(offcanvasEl).show();
+          }
+          return { ok: true };
+        })
+        .catch(function () {
+          var message = "Impossible d'envoyer la commande. Vérifiez votre connexion.";
+          if (!takeaway) showToast(message, true);
+          return { ok: false, error: message };
+        });
+    }
+
     if (submitBtn && recapModal) {
       submitBtn.addEventListener("click", function (e) {
         e.preventDefault();
         var cart = updateCartUI();
         if (cart.count === 0) return;
         renderRecap();
+        setRecapBusy(false);
         recapModal.show();
       });
 
       recapConfirmBtn.addEventListener("click", function () {
-        var labelEl = recapConfirmBtn.querySelector(".confirm-label");
-        var spinnerEl = recapConfirmBtn.querySelector(".spinner-border");
-        recapConfirmBtn.disabled = true;
-        if (labelEl) labelEl.textContent = translateKey("cart_sending") || "Envoi…";
-        if (spinnerEl) spinnerEl.classList.remove("d-none");
-
-        var targetUrl = addModeOrderId
-          ? "/m/" + slug + "/commande/" + addModeOrderId + "/ajouter"
-          : form.action;
-
-        fetch(targetUrl, {
-          method: "POST",
-          headers: { "X-Requested-With": "fetch" },
-          body: new FormData(form)
-        })
-          .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
-          .then(function (res) {
-            recapModal.hide();
-            recapConfirmBtn.disabled = false;
-            if (labelEl) labelEl.textContent = translateKey("cart_submit_confirm") || "Confirmer l'envoi";
-            if (spinnerEl) spinnerEl.classList.add("d-none");
-
-            var data = res.data;
-
-            if (!data.ok) {
-              if (data.locked) {
-                showToast(data.error, true);
-                exitAddMode();
-                refreshMyOrders();
-                return;
-              }
-              showToast(data.error || "Une erreur est survenue.", true);
-              return;
-            }
-
-            if (addModeOrderId) {
-              showToast("Plats ajoutés à la commande #" + data.id + ".", false);
-              exitAddMode();
-            } else {
-              addStoredId(data.id);
-              resetCart();
-              showToast("Commande envoyée ! Suivez-la dans « Mes commandes ».", false);
-            }
-
-            refreshMyOrders();
-
-            var offcanvasEl = document.getElementById("my-orders-offcanvas");
-            if (offcanvasEl && typeof bootstrap !== "undefined") {
-              bootstrap.Offcanvas.getOrCreateInstance(offcanvasEl).show();
-            }
-          })
-          .catch(function () {
-            recapConfirmBtn.disabled = false;
-            if (labelEl) labelEl.textContent = translateKey("cart_submit_confirm") || "Confirmer l'envoi";
-            if (spinnerEl) spinnerEl.classList.add("d-none");
-            showToast("Impossible d'envoyer la commande. Vérifiez votre connexion.", true);
-          });
+        if (isTakeawayFlow()) {
+          var cart = readCart();
+          var summary = cart.count + " " + cartArticleLabel(cart.count) + " · " +
+                        formatNumber(cart.total) + " " + currency;
+          recapModalEl.addEventListener("hidden.bs.modal", function () {
+            window.MFTakeaway.open(sendOrder, summary);
+          }, { once: true });
+          recapModal.hide();
+          return;
+        }
+        setRecapBusy(true);
+        sendOrder().then(function (res) {
+          setRecapBusy(false);
+          if (res.ok || res.handled) recapModal.hide();
+        });
       });
     }
 
@@ -1196,6 +1242,8 @@
     initThemeLiveSync();
   });
 })();
+
+
 
 
 

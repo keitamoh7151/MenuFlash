@@ -1,3 +1,61 @@
+/* ==========================================================================
+   MenuFlash Mini — commandes à emporter (menu client et page de suivi)
+   ========================================================================== */
+
+/* ---------- Bandeau du lien général ---------- */
+.mf-tk-banner {
+  display: flex; align-items: flex-start; gap: 12px; margin: 18px 0 4px;
+  padding: 12px 14px; border-radius: 14px;
+  background: var(--mf-accent-light, #FBE9CC); color: var(--mf-ink, #1A1D23);
+  border: 1px solid rgba(217, 142, 31, .35);
+}
+.mf-tk-banner > i { font-size: 1.35rem; color: var(--mf-accent-dark, #B5730F); flex-shrink: 0; line-height: 1.2; }
+.mf-tk-banner strong { display: block; }
+.mf-tk-banner-hint { font-size: .84rem; color: var(--mf-ink-soft, #6B6A66); margin-top: 2px; }
+.mf-tk-banner.is-browse { background: #fff; border-color: var(--mf-border, #E7E4DD); }
+.mf-tk-banner.is-browse > i { color: var(--mf-ink-soft, #6B6A66); }
+
+/* ---------- Menu en consultation seulement ---------- */
+body.mf-browse-only .mf-qty-group,
+body.mf-browse-only #cart-bar,
+body.mf-browse-only .mf-notes-wrap,
+body.mf-browse-only .mf-pop-add,
+body.mf-browse-only .mf-pop-qty,
+body.mf-browse-only .mf-addto-btn { display: none !important; }
+
+/* ---------- Fenêtre « À emporter » ---------- */
+.mf-tk-modal .modal-content { border: 0; border-radius: 18px; }
+.mf-tk-modal .modal-title { font-weight: 700; display: flex; align-items: center; }
+.mf-tk-modal .modal-title i { color: var(--mf-accent-dark, #B5730F); }
+.mf-tk-grip { display: none; }
+.mf-tk-modal .form-control, .mf-tk-modal .form-select { font-size: 1rem; }
+.mf-tk-when { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.mf-tk-option {
+  display: flex; align-items: center; gap: 10px; margin: 0; cursor: pointer;
+  padding: 10px 12px; border-radius: 12px; background: #fff;
+  border: 1.5px solid var(--mf-border, #E7E4DD); transition: border-color .15s ease, background-color .15s ease;
+}
+.mf-tk-option i { font-size: 1.15rem; color: var(--mf-ink-soft, #6B6A66); flex-shrink: 0; }
+.mf-tk-option span { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.mf-tk-option strong { font-size: .92rem; }
+.mf-tk-option small { color: var(--mf-ink-soft, #6B6A66); font-size: .78rem; }
+.btn-check:checked + .mf-tk-option { border-color: var(--mf-accent, #D98E1F); background: var(--mf-accent-light, #FBE9CC); }
+.btn-check:checked + .mf-tk-option i { color: var(--mf-accent-dark, #B5730F); }
+.btn-check:focus-visible + .mf-tk-option { outline: 2px solid var(--mf-accent, #D98E1F); outline-offset: 2px; }
+
+@media (max-width: 575.98px) {
+  .mf-tk-modal .modal-dialog {
+    position: fixed; left: 0; right: 0; bottom: 0; margin: 0; max-width: none;
+    height: auto; max-height: 94vh; min-height: 0;
+    transform: translateY(100%); transition: transform .28s ease-out;
+  }
+  .mf-tk-modal.show .modal-dialog { transform: none; }
+  .mf-tk-modal .modal-content { border-radius: 20px 20px 0 0; max-height: 94vh; }
+  .mf-tk-modal .modal-body { overflow-y: auto; }
+  .mf-tk-modal .modal-footer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .mf-tk-grip { display: block; width: 42px; height: 5px; border-radius: 999px; background: #D5D1C8; margin: 8px auto 0; }
+}
+
 .mf-fulfillment { border: 1px solid var(--mf-border, #dee2e6); border-radius: 14px; padding: 14px; background: #fff; }
 .mf-fulfillment-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .mf-fulfillment-choice label { border: 1px solid var(--mf-border, #dee2e6); border-radius: 10px; padding: 10px; text-align: center; cursor: pointer; font-weight: 600; }
@@ -17,3 +75,5 @@
 .mf-ref-code strong { font-family: "Courier New", ui-monospace, monospace; font-size: 1.5rem; letter-spacing: .14em; padding: 0 8px; border-radius: 8px; background: #fff; border: 2px solid var(--mf-accent, #D98E1F); color: var(--mf-ink, #1A1D23); }
 .mf-ref-hint { font-size: .78rem; color: var(--mf-ink-soft, #6B6A66); margin-top: 4px; }
 .mf-ref-pickup { font-size: .88rem; margin-top: 6px; color: var(--mf-accent-dark, #B5730F); font-weight: 600; }
+
+

@@ -1,6 +1,14 @@
 """
 MenuFlash Mini - Commandes à emporter (phases 1 et 2).
 
+Règle de commande :
+- QR code d'une TABLE (?qr=… ou ?t=…) : commande SUR PLACE uniquement, sans choix.
+- LIEN GÉNÉRAL du menu (/m/<slug>) : commande À EMPORTER uniquement. Le client
+  remplit une fenêtre (prénom, téléphone, heure de retrait, email facultatif).
+  Si le restaurant n'accepte pas les commandes à emporter (désactivées,
+  suspendues ou non incluses dans sa formule), le menu est en consultation.
+- Ces règles sont appliquées CÔTÉ SERVEUR.
+
 Mise à jour : référence à 10 caractères (order_refs.py) à la place de « A-id »,
 prénom et téléphone du client visibles par l'équipe, ticket imprimable (tickets.py).
 
@@ -23,19 +31,24 @@ isolation par restaurant.
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta
+from collections import Counter
+from datetime import datetime, time as dtime, timedelta
 
 from flask import flash, g, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
 
 from mailer import send_transactional_email
-from models import Order, Restaurant, db
+from werkzeug.datastructures import ImmutableMultiDict
+
+from models import Order, QRCode, Restaurant, db
 from order_refs import display_reference, ensure_reference, get_reference
 from phone_utils import check_phone
-from service import local_now
+from service import RestaurantHours, _intervals_around, local_now
 
 log = logging.getLogger("menuflash.takeaway")
 MAX_ADVANCE_DAYS = 7
+SLOT_DAYS = 3
+MAX_SLOT_OPTIONS = 120
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
 
 
@@ -75,6 +88,66 @@ def takeaway_info_map(order_ids):
     rows = TakeawayOrder.query.filter(TakeawayOrder.order_id.in_(ids)).all()
     return {r.order_id: {"name": r.customer_name, "phone": r.customer_phone,
                          "pickup": r.pickup_at, "pickup_type": r.pickup_type} for r in rows}
+
+
+def resolve_table(restaurant_id, qr_id=None, label=None):
+    """Table du client, ou None si la commande vient du lien général."""
+    if qr_id:
+        qr = QRCode.query.filter_by(id=qr_id, restaurant_id=restaurant_id).first()
+        if qr:
+            return qr.label
+    label = re.sub(r"\s+", " ", label or "").strip()[:50]
+    if not label:
+        return None
+    q = QRCode.query.filter_by(restaurant_id=restaurant_id)
+    if q.count():
+        return label if q.filter_by(label=label).first() else None
+    return label
+
+
+def _opening_intervals(restaurant_id, around):
+    rec = db.session.get(RestaurantHours, restaurant_id)
+    if rec is None or not rec.enabled:
+        return None
+    return sorted(_intervals_around(rec.slots(), around))
+
+
+def _is_open_at(intervals, moment):
+    return intervals is None or any(a <= moment < b for a, b in intervals)
+
+
+def pickup_slots(restaurant_id, s, now):
+    """Créneaux de retrait proposés, regroupés par jour (délai, horaires, capacité)."""
+    step = max(5, int(s.slot_minutes or 15))
+    earliest = now + timedelta(minutes=s.prep_minutes)
+    first = earliest.replace(second=0, microsecond=0)
+    if first < earliest:
+        first += timedelta(minutes=1)
+    first += timedelta(minutes=(-(first.hour * 60 + first.minute)) % step)
+    horizon = datetime.combine(now.date() + timedelta(days=SLOT_DAYS), dtime.min)
+    intervals = _opening_intervals(restaurant_id, now)
+
+    used = Counter()
+    rows = (db.session.query(TakeawayOrder.pickup_at)
+            .join(Order, Order.id == TakeawayOrder.order_id)
+            .filter(TakeawayOrder.restaurant_id == restaurant_id,
+                    TakeawayOrder.pickup_at >= first - timedelta(minutes=step),
+                    TakeawayOrder.pickup_at < horizon, Order.status != "annulee").all())
+    for (p,) in rows:
+        used[_slot_bounds(p, step)[0]] += 1
+
+    days, t, n = [], first, 0
+    while t < horizon and n < MAX_SLOT_OPTIONS:
+        if _is_open_at(intervals, t):
+            delta = (t.date() - now.date()).days
+            if not days or days[-1]["date"] != t.date():
+                days.append({"date": t.date(), "key": {0: "tk_today", 1: "tk_tomorrow"}.get(delta),
+                             "label": t.strftime("%d/%m"), "slots": []})
+            days[-1]["slots"].append({"value": t.strftime("%Y-%m-%dT%H:%M"), "label": t.strftime("%H:%M"),
+                                      "full": used[t] >= s.max_per_slot})
+            n += 1
+        t += timedelta(minutes=step)
+    return days
 
 
 def _clean(value, n):
@@ -156,6 +229,49 @@ def init_takeaway(app, *, owner_required, active_restaurant, order_hooks):
         return resp
 
     # ------------------------------------------------------------------
+    # Menu public : mode « table » (sur place) ou « lien général » (à emporter)
+    # ------------------------------------------------------------------
+    def public_state(restaurant):
+        s = settings_for(restaurant.id)
+        try:
+            from plans import has_feature
+            allowed = has_feature(restaurant, "takeaway")
+        except Exception:
+            db.session.rollback()
+            allowed = True
+        state = "disabled"
+        if allowed and s and s.enabled:
+            state = "paused" if s.paused else "open"
+        data = {"mode": "remote", "table": None, "state": state}
+        if state == "open":
+            now = local_now()
+            slots = pickup_slots(restaurant.id, s, now) if s.allow_scheduled else []
+            asap_at = now + timedelta(minutes=s.prep_minutes)
+            asap_ok = bool(s.allow_asap) and _is_open_at(_opening_intervals(restaurant.id, now), asap_at)
+            data.update(allow_asap=asap_ok, prep_minutes=s.prep_minutes,
+                        asap_time=asap_at.strftime("%H:%M"), slots=slots,
+                        has_slot=any(not x["full"] for d in slots for x in d["slots"]))
+        return data
+
+    @app.context_processor
+    def _inject_takeaway_mode():
+        if request.endpoint != "public_menu":
+            return {}
+        try:
+            slug = (request.view_args or {}).get("slug")
+            restaurant = Restaurant.query.filter_by(slug=slug, is_active=True).first() if slug else None
+            if restaurant is None:
+                return {}
+            table = resolve_table(restaurant.id, request.args.get("qr", type=int), request.args.get("t"))
+            if table:
+                return {"mf_takeaway": {"mode": "table", "table": table}}
+            return {"mf_takeaway": public_state(restaurant)}
+        except Exception:
+            db.session.rollback()
+            log.exception("Mode du menu public impossible à déterminer")
+            return {}
+
+    # ------------------------------------------------------------------
     # Détails publics d'une commande à emporter (par jeton aléatoire)
     # ------------------------------------------------------------------
     @app.route("/commande-emporter/<token>.json")
@@ -172,10 +288,25 @@ def init_takeaway(app, *, owner_required, active_restaurant, order_hooks):
     original_place_order = app.view_functions["place_order"]
 
     def place_order(slug):
-        if request.form.get("fulfillment") != "takeaway":
+        restaurant = Restaurant.query.filter_by(slug=slug, is_active=True).first_or_404()
+        wants_takeaway = request.form.get("fulfillment") == "takeaway"
+        table = resolve_table(restaurant.id, request.form.get("qr_id", type=int),
+                              request.form.get("table_label"))
+
+        # QR code d'une table : toujours sur place, avec le nom de table officiel.
+        if table:
+            if wants_takeaway:
+                return _fail("Cette commande vient d'une table : elle sera servie sur place.")
+            data = request.form.to_dict(flat=False)
+            data["table_label"] = [table]
+            request.form = ImmutableMultiDict(data)
             return original_place_order(slug)
 
-        restaurant = Restaurant.query.filter_by(slug=slug, is_active=True).first_or_404()
+        # Lien général : uniquement à emporter.
+        if not wants_takeaway:
+            return _fail("Pour manger sur place, scannez le QR code de votre table "
+                         "ou commandez à la caisse.")
+
         s = settings_for(restaurant.id)
         if not s or not s.enabled:
             return _fail("Les commandes à emporter ne sont pas proposées par ce restaurant.")
@@ -213,6 +344,12 @@ def init_takeaway(app, *, owner_required, active_restaurant, order_hooks):
             if not s.allow_asap:
                 return _fail("Le retrait dès que possible n'est pas proposé. Choisissez une heure.")
             pickup = earliest
+
+        if not _is_open_at(_opening_intervals(restaurant.id, pickup), pickup):
+            if kind == "asap":
+                return _fail("Le restaurant ferme avant que votre commande soit prête. "
+                             "Choisissez une heure de retrait.")
+            return _fail("Le restaurant est fermé à cette heure-là. Choisissez un autre créneau.")
 
         start, end = _slot_bounds(pickup, s.slot_minutes)
         used = (db.session.query(TakeawayOrder.order_id)
@@ -289,5 +426,7 @@ def init_takeaway(app, *, owner_required, active_restaurant, order_hooks):
         return resp
 
     app.view_functions["admin_order_advance"] = admin_order_advance
+
+
 
 
