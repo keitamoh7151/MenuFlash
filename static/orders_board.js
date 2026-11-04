@@ -99,6 +99,26 @@
         beep("new_order");                // aperçu immédiat du volume choisi
       });
     });
+    var styleSelect = document.getElementById("ob-style");
+    if (styleSelect) {
+      try { styleSelect.value = localStorage.getItem("mf_sound_style") || "marimba"; } catch (e) {}
+      if (!styleSelect.value) styleSelect.value = "marimba";
+      var styleHint = document.getElementById("ob-style-hint");
+      var renderStyleHint = function () {
+        if (!styleHint) return;
+        styleHint.textContent = styleSelect.value === "fichiers"
+          ? "Utilise les fichiers MP3 déposés dans static/sounds/ (new_order.mp3…). S'ils manquent, le style « Livraison » est joué."
+          : "Choisir un style le fait entendre aussitôt.";
+      };
+      renderStyleHint();
+      styleSelect.addEventListener("change", function () {
+        if (!window.MFSound) return;
+        window.MFSound.setStyle(styleSelect.value);
+        renderStyleHint();
+        soundBtn.dataset.on = "1"; renderSound();
+        window.MFSound.play("new_order", styleSelect.value);   // aperçu immédiat
+      });
+    }
     var remindSwitch = document.getElementById("ob-reminder");
     if (remindSwitch) {
       remindSwitch.checked = reminderOn;
@@ -110,7 +130,7 @@
     document.querySelectorAll("[data-ob-sound-test]").forEach(function (b) {
       b.addEventListener("click", function () {
         soundBtn.dataset.on = "1"; renderSound();
-        beep(b.getAttribute("data-ob-sound-test"));
+        if (window.MFSound) window.MFSound.play(b.getAttribute("data-ob-sound-test"), window.MFSound.style());
       });
     });
     // Rappel sonore tant qu'une nouvelle commande n'est pas prise en charge.

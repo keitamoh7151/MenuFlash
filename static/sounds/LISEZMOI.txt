@@ -1,0 +1,13 @@
+Sons personnalisés MenuFlash (style « Mes sons (fichiers MP3) »)
+
+Déposez ici des fichiers MP3 libres de droits avec ces noms exacts :
+  new_order.mp3   nouvelle commande (le plus important)
+  updated.mp3     plats ajoutés à une commande
+  cancelled.mp3   commande annulée
+  call.mp3        appel d'une table
+  reminder.mp3    rappel (sinon new_order.mp3 est utilisé)
+
+Un fichier absent est remplacé par le son « Livraison » (marimba).
+Conseil : des fichiers courts (1 à 3 s) et légers (moins de 100 Ko).
+N'utilisez pas les sons d'autres applications (DoorDash, Uber Eats…) :
+ils sont protégés par le droit d'auteur.

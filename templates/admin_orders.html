@@ -39,6 +39,16 @@
             <i class="bi bi-sliders"></i>
           </button>
           <div class="dropdown-menu dropdown-menu-end p-3 ob-sound-panel">
+            <label class="small fw-semibold mb-1" for="ob-style">Style de son</label>
+            <select class="form-select form-select-sm mb-1" id="ob-style">
+              <option value="marimba">Livraison — marimba vif et joyeux</option>
+              <option value="carillon">Carillon — « ding-dong » de comptoir</option>
+              <option value="xylophone">Xylophone — rapide et brillant</option>
+              <option value="bulle">Bulle — « pop » moderne</option>
+              <option value="harpe">Harpe — doux et chaleureux</option>
+              <option value="fichiers">Mes sons (fichiers MP3)</option>
+            </select>
+            <p class="small text-secondary mb-3" id="ob-style-hint">Choisir un style le fait entendre aussitôt.</p>
             <div class="small fw-semibold mb-2">Volume des notifications</div>
             <div class="btn-group w-100 mb-1" role="group" aria-label="Volume">
               <input type="radio" class="btn-check" name="ob-volume" id="ob-vol-normal" value="normal">
@@ -148,7 +158,7 @@
 </div>
 {% endblock %}
 {% block extra_scripts %}
-<script src="{{ url_for('static', filename='orders_board.js') }}?v=3"></script>
+<script src="{{ url_for('static', filename='orders_board.js') }}?v=4"></script>
 {% endblock %}
 
 
