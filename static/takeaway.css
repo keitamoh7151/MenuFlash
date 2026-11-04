@@ -4,3 +4,16 @@
 .mf-fulfillment-choice label:has(input:checked) { border-color: var(--mf-accent, #0d6efd); background: var(--mf-accent-light, #eef4ff); }
 .mf-fulfillment-choice input { margin-right: 6px; }
 @media (max-width: 420px) { .mf-fulfillment-choice { grid-template-columns: 1fr; } }
+
+
+
+/* ---------- Numéro de commande et code de retrait (page de suivi client) ---------- */
+.mf-ref-box { background: var(--mf-bg, #F7F6F3); border-radius: 12px; padding: 12px 14px; }
+.mf-ref-label { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: .78rem; color: var(--mf-ink-soft, #6B6A66); }
+.mf-ref-badge { font-weight: 700; font-size: .72rem; padding: 2px 8px; border-radius: 999px; background: var(--mf-accent-light, #FBE9CC); color: var(--mf-accent-dark, #B5730F); }
+.mf-ref-number { font-family: "Courier New", ui-monospace, monospace; font-size: 1.35rem; letter-spacing: .08em; color: var(--mf-ink, #1A1D23); margin-top: 2px; overflow-wrap: anywhere; }
+.mf-ref-number strong { color: var(--mf-accent-dark, #B5730F); font-size: 1.15em; }
+.mf-ref-code { margin-top: 6px; font-weight: 600; }
+.mf-ref-code strong { font-family: "Courier New", ui-monospace, monospace; font-size: 1.5rem; letter-spacing: .14em; padding: 0 8px; border-radius: 8px; background: #fff; border: 2px solid var(--mf-accent, #D98E1F); color: var(--mf-ink, #1A1D23); }
+.mf-ref-hint { font-size: .78rem; color: var(--mf-ink-soft, #6B6A66); margin-top: 4px; }
+.mf-ref-pickup { font-size: .88rem; margin-top: 6px; color: var(--mf-accent-dark, #B5730F); font-weight: 600; }

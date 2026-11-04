@@ -1,6 +1,9 @@
 """
 MenuFlash Mini - Commandes à emporter (phases 1 et 2).
 
+Mise à jour : référence à 10 caractères (order_refs.py) à la place de « A-id »,
+prénom et téléphone du client visibles par l'équipe, ticket imprimable (tickets.py).
+
 Branchement dans app.py (déjà fait dans le fichier fourni), tout en bas :
 
     from takeaway import init_takeaway
@@ -27,6 +30,7 @@ from flask_login import login_required
 
 from mailer import send_transactional_email
 from models import Order, Restaurant, db
+from order_refs import display_reference, ensure_reference, get_reference
 from phone_utils import check_phone
 from service import local_now
 
@@ -60,6 +64,17 @@ class TakeawayOrder(db.Model):
     payment_method = db.Column(db.String(20), default="pickup", nullable=False)
     confirmation_sent = db.Column(db.Boolean, default=False)
     ready_sent = db.Column(db.Boolean, default=False)
+
+
+def takeaway_info_map(order_ids):
+    """{order_id: {name, phone, pickup, pickup_type}} pour l'écran cuisine et le ticket.
+    Le téléphone n'est destiné qu'à l'équipe du restaurant (jamais au ticket ni au client)."""
+    ids = [i for i in order_ids if i]
+    if not ids:
+        return {}
+    rows = TakeawayOrder.query.filter(TakeawayOrder.order_id.in_(ids)).all()
+    return {r.order_id: {"name": r.customer_name, "phone": r.customer_phone,
+                         "pickup": r.pickup_at, "pickup_type": r.pickup_type} for r in rows}
 
 
 def _clean(value, n):
@@ -147,7 +162,7 @@ def init_takeaway(app, *, owner_required, active_restaurant, order_hooks):
     def takeaway_public(token):
         t = TakeawayOrder.query.filter_by(public_token=token).first_or_404()
         o = db.session.get(Order, t.order_id)
-        return jsonify(reference=f"A-{o.id}", name=t.customer_name, status=o.status,
+        return jsonify(reference=display_reference(o.id), name=t.customer_name, status=o.status,
                        pickup_at=t.pickup_at.strftime("%Y-%m-%dT%H:%M"), total=o.total,
                        payment="Paiement au retrait")
 
@@ -221,21 +236,24 @@ def init_takeaway(app, *, owner_required, active_restaurant, order_hooks):
         data = getattr(g, "takeaway", None)
         if not data or data["restaurant"].id != order.restaurant_id:
             return
-        order.table_label = f"À EMPORTER · A-{order.id} · {data['name']}"[:50]
+        order.table_label = f"À emporter · {data['name']}"[:50]
         row = TakeawayOrder(order_id=order.id, restaurant_id=order.restaurant_id,
                             public_token=secrets.token_urlsafe(32), customer_name=data["name"],
                             customer_phone=data["phone"], customer_email=data["email"],
                             pickup_at=data["pickup"], pickup_type=data["kind"])
         db.session.add(row)
         db.session.commit()
+        ref = ensure_reference(order) or f"#{order.id}"
         if data["email"]:
             try:
                 link = url_for("order_status", slug=data["restaurant"].slug, order_id=order.id, _external=True)
                 quand = "dès que possible" if data["kind"] == "asap" else f"{data['pickup']:%d/%m/%Y à %H:%M}"
                 row.confirmation_sent = send_transactional_email(
-                    app, data["email"], f"Commande A-{order.id} confirmée - {data['restaurant'].name}",
-                    f"Bonjour {data['name']},\n\nVotre commande A-{order.id} chez {data['restaurant'].name} "
+                    app, data["email"], f"Commande {ref} confirmée - {data['restaurant'].name}",
+                    f"Bonjour {data['name']},\n\nVotre commande {ref} chez {data['restaurant'].name} "
                     f"est bien reçue.\nRetrait : {quand} (environ {data['pickup']:%H:%M}).\n"
+                    + (f"Code de retrait : {ref[-3:]} (les 3 derniers caractères du numéro).\n"
+                       if not ref.startswith("#") else "") +
                     f"Paiement au retrait.\n\nSuivez votre commande : {link}\n"
                     f"Vous pouvez l'annuler tant que la préparation n'a pas commencé.\n")
                 db.session.commit()
@@ -256,11 +274,14 @@ def init_takeaway(app, *, owner_required, active_restaurant, order_hooks):
             t = db.session.get(TakeawayOrder, order_id)
             o = db.session.get(Order, order_id)
             if t and o and o.status == "prete" and t.customer_email and not t.ready_sent:
+                ref = get_reference(o.id) or f"#{o.id}"
                 t.ready_sent = send_transactional_email(
-                    app, t.customer_email, f"Commande A-{o.id} prête - {o.restaurant.name}",
-                    f"Bonjour {t.customer_name},\n\nVotre commande A-{o.id} est prête : "
+                    app, t.customer_email, f"Commande {ref} prête - {o.restaurant.name}",
+                    f"Bonjour {t.customer_name},\n\nVotre commande {ref} est prête : "
                     f"vous pouvez venir la récupérer chez {o.restaurant.name}.\n"
-                    f"Paiement au retrait. Donnez simplement la référence A-{o.id}.\n")
+                    + (f"Paiement au retrait. Au comptoir, donnez votre code de retrait {ref[-3:]} "
+                       f"ou le numéro complet {ref}.\n" if not ref.startswith("#")
+                       else f"Paiement au retrait. Donnez la référence {ref}.\n"))
                 db.session.commit()
         except Exception:
             db.session.rollback()
@@ -268,3 +289,5 @@ def init_takeaway(app, *, owner_required, active_restaurant, order_hooks):
         return resp
 
     app.view_functions["admin_order_advance"] = admin_order_advance
+
+

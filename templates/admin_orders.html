@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Commandes — {{ restaurant.name }}{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='orders_board.css') }}?v=1">
+<link rel="stylesheet" href="{{ url_for('static', filename='orders_board.css') }}?v=2">
 {% endblock %}
 {% block content %}
 {% include "_admin_navbar.html" %}
@@ -12,6 +12,8 @@
      data-advance-url="/admin/commandes/{id}/avancer"
      data-cancel-url="/admin/commandes/{id}/annuler"
      data-undo-url="/admin/commandes/{id}/remettre-prete"
+     data-ticket-url="/admin/commandes/{id}/ticket"
+     data-restaurant="{{ restaurant.id }}"
      data-currency="{{ restaurant.currency }}"
      data-start-view="{{ 'history' if show_all else 'board' }}">
 
@@ -30,6 +32,27 @@
       <button type="button" class="ob-sound is-off" id="ob-sound" aria-live="polite">
         <i class="bi bi-volume-mute-fill"></i><span>Activer le son</span>
       </button>
+      <div class="dropdown">
+        <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle ob-print-menu" id="ob-print-menu"
+                data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+          <i class="bi bi-printer me-1"></i><span id="ob-print-state">Impression</span>
+        </button>
+        <div class="dropdown-menu dropdown-menu-end p-3 ob-print-panel">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="ob-autoprint">
+            <label class="form-check-label small fw-semibold" for="ob-autoprint">Imprimer automatiquement les nouvelles commandes à emporter</label>
+          </div>
+          <p class="small text-secondary mb-2">Réglage propre à <strong>cet appareil</strong> : activez-le uniquement sur l'ordinateur ou la tablette relié(e) à l'imprimante.</p>
+          <label class="form-label small fw-semibold mb-1" for="ob-paper">Largeur du papier</label>
+          <select class="form-select form-select-sm mb-2" id="ob-paper">
+            <option value="80">80 mm (le plus courant)</option>
+            <option value="58">58 mm</option>
+          </select>
+          <button type="button" class="btn btn-sm btn-outline-secondary w-100 mb-2" id="ob-print-test">
+            <i class="bi bi-printer me-1"></i>Imprimer un ticket de test</button>
+          <p class="small text-secondary mb-0">Sur ordinateur, pour imprimer sans la fenêtre de confirmation, lancez Chrome avec l'option <code>--kiosk-printing</code>.</p>
+        </div>
+      </div>
       <button type="button" class="btn btn-sm btn-outline-secondary" id="ob-kitchen" title="Plein écran, texte agrandi, écran toujours allumé">
         <i class="bi bi-arrows-fullscreen me-1"></i><span>Mode cuisine</span>
       </button>
@@ -93,5 +116,7 @@
 </div>
 {% endblock %}
 {% block extra_scripts %}
-<script src="{{ url_for('static', filename='orders_board.js') }}?v=1"></script>
+<script src="{{ url_for('static', filename='orders_board.js') }}?v=2"></script>
 {% endblock %}
+
+

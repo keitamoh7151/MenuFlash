@@ -625,7 +625,10 @@
           '<div class="card-body">' +
             '<div class="d-flex justify-content-between align-items-start mb-2">' +
               '<span class="badge mf-status-badge mf-status-' + order.status + '">' + statusLabel(order.status) + '</span>' +
-              '<span class="small text-secondary">#' + order.id + '</span>' +
+              (order.reference
+                ? '<span class="small text-secondary mf-myorder-ref">' + escapeHtml(order.reference.slice(0, -3)) +
+                  '<strong>' + escapeHtml(order.reference.slice(-3)) + '</strong></span>'
+                : '<span class="small text-secondary">#' + order.id + '</span>') +
             '</div>' +
             '<ul class="mf-myorder-items">' + itemsHtml + '</ul>' +
             noteHtml +
@@ -1193,4 +1196,6 @@
     initThemeLiveSync();
   });
 })();
+
+
 

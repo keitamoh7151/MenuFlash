@@ -129,3 +129,27 @@ body.ob-kitchen .ob-wait { font-size: .95rem; padding: 4px 11px; }
 body.ob-kitchen .ob-next { min-height: 52px; font-size: 1.05rem; }
 body.ob-kitchen .ob-cancel { min-height: 52px; width: 52px; }
 body.ob-kitchen .ob-col-head { font-size: 1.1rem; padding: 14px 16px; }
+
+
+
+/* ---------- Commandes à emporter, référence et impression ---------- */
+.ob-card--takeaway { border-left-color: #7A2436; }
+.ob-card--takeaway.ob-card--warn { border-left-color: #E0A030; }
+.ob-card--takeaway.ob-card--late { border-left-color: var(--mf-danger); }
+.ob-tk-badge { display: inline-block; vertical-align: middle; margin-right: 6px; font-family: "Inter", sans-serif;
+               font-size: .68rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase;
+               padding: 3px 8px; border-radius: 999px; background: #7A2436; color: #fff; }
+.ob-tk-name { vertical-align: middle; }
+.ob-ref { font-family: "Courier New", ui-monospace, monospace; letter-spacing: .06em; color: var(--mf-ink); }
+.ob-ref b { color: var(--mf-accent-dark); font-size: 1.12em; }
+.ob-ref--small { font-size: .78rem; }
+.ob-tk { background: #F6EEF0; border-radius: 10px; padding: 6px 10px; margin-bottom: 8px; }
+.ob-tk-line { font-size: .88rem; font-weight: 600; color: #591A27; overflow-wrap: anywhere; }
+.ob-tk-phone { font-variant-numeric: tabular-nums; user-select: all; }
+.ob-print { width: 40px; min-height: 40px; border: 1px solid var(--mf-border); background: #fff; color: var(--mf-ink); flex-shrink: 0; }
+.ob-print:hover { background: var(--mf-bg); }
+.ob-print-menu.is-auto { background: var(--mf-success-bg); color: var(--mf-success); border-color: transparent; }
+.ob-print-panel { width: min(320px, calc(100vw - 24px)); }
+.ob-print-frame { position: fixed; right: 0; bottom: 0; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; }
+body.ob-kitchen .ob-print { min-height: 52px; width: 52px; }
+body.ob-kitchen .ob-tk-line { font-size: 1rem; }

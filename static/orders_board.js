@@ -31,6 +31,16 @@
   function fmt(n) { return Math.round(n || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " "); }
   function toast(msg, isError) { if (window.MFShowToast) window.MFShowToast(msg, !!isError); }
   function url(tpl, id) { return tpl.replace("{id}", encodeURIComponent(id)); }
+  // Référence « 7KM4XP92DT » : les 3 derniers caractères (code de retrait) en gras.
+  function refEl(ref, cls) {
+    var span = el("span", cls || "ob-ref");
+    if (!ref) return span;
+    span.appendChild(document.createTextNode(ref.slice(0, -3)));
+    span.appendChild(el("b", null, ref.slice(-3)));
+    span.title = "Code de retrait : " + ref.slice(-3);
+    return span;
+  }
+
   function minutes(n) { return n < 1 ? "à l'instant" : (n < 60 ? n + " min" : Math.floor(n / 60) + " h " + (n % 60 ? (n % 60) + " min" : "")); }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -126,6 +136,103 @@
       });
     });
 
+    /* ============================ Impression ============================ */
+    // Réglages PROPRES À CET APPAREIL (mémorisés dans le navigateur) : seul le
+    // PC ou la tablette relié(e) à l'imprimante imprime automatiquement, pas le
+    // téléphone du gérant qui affiche aussi les commandes.
+    var rid = root.dataset.restaurant || "0";
+    var PRINT_KEY = "mf_print_" + rid;
+    var printCfg = { auto: false, width: 80, printed: [] };
+    try {
+      var saved = JSON.parse(localStorage.getItem(PRINT_KEY) || "{}");
+      printCfg.auto = saved.auto === true;
+      printCfg.width = saved.width === 58 ? 58 : 80;
+      printCfg.printed = Array.isArray(saved.printed) ? saved.printed.slice(-200) : [];
+    } catch (e) {}
+    function savePrintCfg() {
+      try {
+        localStorage.setItem(PRINT_KEY, JSON.stringify({ auto: printCfg.auto, width: printCfg.width,
+                                                          printed: printCfg.printed.slice(-200) }));
+      } catch (e) {}
+    }
+    function markPrinted(id) {
+      if (printCfg.printed.indexOf(id) === -1) { printCfg.printed.push(id); savePrintCfg(); }
+    }
+    var coarse = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    var printQueue = [], printing = false;
+
+    function ticketUrl(id, autoprint) {
+      return url(root.dataset.ticketUrl, id) + "?w=" + printCfg.width + (autoprint ? "&print=1" : "");
+    }
+    function runQueue() {
+      if (printing || !printQueue.length) return;
+      printing = true;
+      var id = printQueue.shift();
+      var frame = document.createElement("iframe");
+      frame.className = "ob-print-frame";
+      frame.setAttribute("aria-hidden", "true");
+      frame.tabIndex = -1;
+      frame.src = ticketUrl(id, true);        // le ticket lance lui-même l'impression
+      document.body.appendChild(frame);
+      // Laisse le temps à l'impression de partir, puis passe au ticket suivant.
+      setTimeout(function () { frame.remove(); printing = false; runQueue(); }, 8000);
+    }
+    function printTicket(id, manual) {
+      markPrinted(id);
+      if (manual && coarse) {
+        // Tablette / téléphone : l'impression d'un cadre est peu fiable, on ouvre un onglet.
+        var w = window.open(ticketUrl(id, true), "_blank");
+        if (!w) toast("Autorisez les fenêtres pop-up pour imprimer le ticket.", true);
+        return;
+      }
+      if (printQueue.indexOf(id) === -1) printQueue.push(id);
+      runQueue();
+    }
+    function autoPrint(list) {
+      if (!printCfg.auto) return;
+      list.forEach(function (o) {
+        if (o.takeaway && o.status === "nouvelle" && o.elapsed <= 30 && printCfg.printed.indexOf(o.id) === -1) {
+          printTicket(o.id, false);
+        }
+      });
+    }
+
+    function renderPrintLabel() {
+      var lbl = document.getElementById("ob-print-state");
+      if (lbl) lbl.textContent = printCfg.auto ? "Impression auto" : "Impression";
+      var btn = document.getElementById("ob-print-menu");
+      if (btn) btn.classList.toggle("is-auto", printCfg.auto);
+    }
+    var autoSwitch = document.getElementById("ob-autoprint");
+    var widthSelect = document.getElementById("ob-paper");
+    if (autoSwitch) {
+      autoSwitch.checked = printCfg.auto;
+      autoSwitch.addEventListener("change", function () {
+        printCfg.auto = autoSwitch.checked;
+        if (printCfg.auto) {
+          // Les commandes déjà affichées ne sont pas réimprimées.
+          (lastData.orders || []).forEach(function (o) { markPrinted(o.id); });
+          toast("Impression automatique activée sur cet appareil pour les nouvelles commandes à emporter.", false);
+        }
+        savePrintCfg();
+        renderPrintLabel();
+      });
+    }
+    if (widthSelect) {
+      widthSelect.value = String(printCfg.width);
+      widthSelect.addEventListener("change", function () {
+        printCfg.width = widthSelect.value === "58" ? 58 : 80;
+        savePrintCfg();
+      });
+    }
+    var testBtn = document.getElementById("ob-print-test");
+    if (testBtn) testBtn.addEventListener("click", function () {
+      var first = (lastData.orders || [])[0];
+      if (!first) { toast("Aucune commande en cours à imprimer pour le test.", true); return; }
+      printTicket(first.id, true);
+    });
+    renderPrintLabel();
+
     /* ============================ Cartes ============================ */
     function level(o) {
       if (o.status === "prete") return o.status_minutes <= 5 ? "ok" : (o.status_minutes <= 10 ? "warn" : "late");
@@ -152,8 +259,16 @@
       var c = el("article", "ob-card ob-card--" + lv + (isNew ? " is-new" : ""));
       c.dataset.id = o.id;
 
+      if (o.takeaway) c.classList.add("ob-card--takeaway");
       var head = el("div", "ob-card-head");
-      head.appendChild(el("div", "ob-table", o.table));
+      if (o.takeaway) {
+        var who = el("div", "ob-table");
+        who.appendChild(el("span", "ob-tk-badge", "À emporter"));
+        who.appendChild(el("span", "ob-tk-name", o.takeaway.name));
+        head.appendChild(who);
+      } else {
+        head.appendChild(el("div", "ob-table", o.table));
+      }
       var wait = el("div", "ob-wait ob-wait--" + lv);
       wait.appendChild(icon("bi-clock"));
       wait.appendChild(document.createTextNode(" " + minutes(o.status === "prete" ? o.status_minutes : o.elapsed)));
@@ -162,8 +277,29 @@
       c.appendChild(head);
 
       var meta = el("div", "ob-meta");
-      meta.textContent = "#" + o.id + " · " + o.time + (o.status === "prete" ? " · prête, en attente de service" : " · prévu ~" + o.prep + " min");
+      if (o.reference) { meta.appendChild(refEl(o.reference)); meta.appendChild(document.createTextNode(" · ")); }
+      else meta.appendChild(document.createTextNode("#" + o.id + " · "));
+      meta.appendChild(document.createTextNode(o.time + (o.status === "prete"
+        ? (o.takeaway ? " · prête, en attente du client" : " · prête, en attente de service")
+        : " · prévu ~" + o.prep + " min")));
       c.appendChild(meta);
+
+      if (o.takeaway) {
+        var tk = el("div", "ob-tk");
+        if (o.takeaway.pickup) {
+          var pk = el("div", "ob-tk-line");
+          pk.appendChild(icon("bi-bag-check"));
+          pk.appendChild(document.createTextNode(" Retrait : " + o.takeaway.pickup));
+          tk.appendChild(pk);
+        }
+        if (o.takeaway.phone) {
+          var ph = el("div", "ob-tk-line ob-tk-phone");
+          ph.appendChild(icon("bi-telephone"));
+          ph.appendChild(document.createTextNode(" " + o.takeaway.phone));
+          tk.appendChild(ph);
+        }
+        c.appendChild(tk);
+      }
 
       var ul = el("ul", "ob-items");
       o.items.forEach(function (it) {
@@ -216,7 +352,14 @@
         render(lastData);
         setTimeout(function () { if (confirmCancel[o.id]) { delete confirmCancel[o.id]; render(lastData); } }, 8000);
       });
+      var printBtn = el("button", "btn ob-print");
+      printBtn.type = "button";
+      printBtn.title = "Imprimer le ticket";
+      printBtn.setAttribute("aria-label", "Imprimer le ticket de " + (o.takeaway ? o.takeaway.name : o.table));
+      printBtn.appendChild(icon("bi-printer"));
+      printBtn.addEventListener("click", function () { printTicket(o.id, true); });
       actions.appendChild(next);
+      actions.appendChild(printBtn);
       actions.appendChild(cancel);
       foot.appendChild(actions);
       c.appendChild(foot);
@@ -244,6 +387,7 @@
           seen[o.id] = true;
           body.appendChild(card(o, known !== null && !known[o.id]));
         });
+        autoPrint(list);
       });
       known = seen;
       board.classList.toggle("d-none", orders.length === 0);
@@ -292,8 +436,9 @@
         var row = el("div", "ob-hrow");
         var left = el("div", "ob-hmain");
         var top = el("div", "ob-htop");
-        top.appendChild(el("strong", null, o.table));
+        top.appendChild(el("strong", null, o.takeaway ? "À emporter · " + o.takeaway.name : o.table));
         top.appendChild(statusBadge(o));
+        if (o.reference) top.appendChild(refEl(o.reference, "ob-ref ob-ref--small"));
         left.appendChild(top);
         left.appendChild(el("div", "ob-hitems", o.items.map(function (it) { return it.quantity + "× " + it.name; }).join(", ")));
         if (o.notes) left.appendChild(el("div", "ob-hnote", "Note : " + o.notes));
@@ -376,3 +521,5 @@
     setView(root.dataset.startView === "history" ? "history" : "board");
   });
 })();
+
+

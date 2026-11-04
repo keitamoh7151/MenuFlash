@@ -16,6 +16,9 @@ Ce que fait le module
   Accessible au gestionnaire ET aux cuisiniers.
 - /admin/commandes/<id>/remettre-prete : remet en « Prête » une commande
   marquée « Servie » par erreur, pendant 30 minutes seulement.
+- Chaque commande est envoyée avec sa référence à 10 caractères et, pour une
+  commande à emporter, le prénom, le téléphone du client et l'heure de retrait
+  (visibles uniquement par l'équipe connectée du restaurant).
 
 Sécurité
 --------
@@ -34,6 +37,7 @@ from flask import jsonify, request, abort
 from flask_login import login_required, current_user
 
 from models import db, Order, DEFAULT_PREP_MINUTES
+from order_refs import references_for
 
 ACTIVE_STATUSES = ("nouvelle", "en_preparation", "prete")
 UNDO_SERVED_MINUTES = 30
@@ -68,6 +72,41 @@ def _prep_minutes(order):
         return int(order.estimated_prep_minutes or DEFAULT_PREP_MINUTES)
     except Exception:
         return DEFAULT_PREP_MINUTES
+
+
+def _takeaway_map(order_ids):
+    try:
+        from takeaway import takeaway_info_map
+        return takeaway_info_map(order_ids)
+    except Exception:
+        db.session.rollback()
+        return {}
+
+
+def _pickup_text(info, now):
+    """« 15:30 » aujourd'hui, « 05/11 15:30 » un autre jour (heure locale du restaurant)."""
+    pickup = info.get("pickup")
+    if not pickup:
+        return ""
+    same_day = pickup.date() == _local(now).date()
+    text = pickup.strftime("%H:%M") if same_day else pickup.strftime("%d/%m %H:%M")
+    return ("dès que possible · ~" + text) if info.get("pickup_type") == "asap" else text
+
+
+def extras_for(orders, now):
+    """Référence et informations « à emporter » pour une liste de commandes (2 requêtes)."""
+    ids = [o.id for o in orders]
+    refs = references_for(ids)
+    takeaway = _takeaway_map(ids)
+    out = {}
+    for oid in ids:
+        info = takeaway.get(oid)
+        out[oid] = {
+            "reference": refs.get(oid),
+            "takeaway": ({"name": info["name"], "phone": info["phone"],
+                          "pickup": _pickup_text(info, now)} if info else None),
+        }
+    return out
 
 
 def board_dict(order, now):
@@ -132,7 +171,8 @@ def init_orders_board(app, *, active_restaurant, log_audit=None):
                   .filter(Order.restaurant_id == r.id, Order.status.in_(ACTIVE_STATUSES))
                   .order_by(Order.created_at.asc())
                   .limit(300).all())
-        data = [board_dict(o, now) for o in orders]
+        extra = extras_for(orders, now)
+        data = [dict(board_dict(o, now), **extra[o.id]) for o in orders]
         waiting = [o["elapsed"] for o in data if o["status"] != "prete"]
         oldest = max((o for o in data if o["status"] != "prete"),
                      key=lambda o: o["elapsed"], default=None)
@@ -174,8 +214,9 @@ def init_orders_board(app, *, active_restaurant, log_audit=None):
         page = min(page, pages)
         rows = (q.order_by(Order.updated_at.desc(), Order.id.desc())
                 .offset((page - 1) * HISTORY_PAGE_SIZE).limit(HISTORY_PAGE_SIZE).all())
+        extra = extras_for(rows, now)
         return _json({
-            "orders": [history_dict(o, now) for o in rows],
+            "orders": [dict(history_dict(o, now), **extra[o.id]) for o in rows],
             "page": page, "pages": pages, "total": total, "filter": flt,
         })
 
@@ -194,3 +235,5 @@ def init_orders_board(app, *, active_restaurant, log_audit=None):
             log_audit("order_undo_served", restaurant_id=r.id, user_email=current_user.email,
                       details=f"commande #{order.id} ({order.table_label or 'sans table'}) remise en « Prête »")
         return _json({"ok": True, "status": order.status})
+
+

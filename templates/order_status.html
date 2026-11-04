@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Commande #{{ order.id }} — {{ restaurant.name }}{% endblock %}
+{% block title %}Commande — {{ restaurant.name }}{% endblock %}
 
 {% block theme_override %}
 <style>
@@ -12,6 +12,8 @@
 {% endblock %}
 
 {% block content %}
+{% set ref = client_order_reference(order.id) %}
+{% set tk = takeaway_public_info(order.id) %}
 
 <script id="mf-i18n-data" type="application/json">{{ translations|tojson }}</script>
 
@@ -55,9 +57,29 @@
         </div>
       {% endif %}
 
-      <p class="text-secondary small mt-3 mb-1">
-        <span data-i18n="order_ref_prefix">Commande</span> #{{ order.id }}{% if order.table_label %} · {{ order.table_label }}{% endif %}
-      </p>
+      <div class="mf-ref-box mt-3 mb-2">
+        <div class="mf-ref-label">
+          <span data-i18n="order_number">Numéro de commande</span>
+          {% if tk %}<span class="mf-ref-badge" data-i18n="takeaway_badge">À emporter</span>
+          {% elif order.table_label %}<span class="mf-ref-badge">{{ order.table_label }}</span>{% endif %}
+        </div>
+        {% if ref %}
+          <div class="mf-ref-number" aria-label="{{ ref|join(' ') }}">{{ ref[:-3] }}<strong>{{ ref[-3:] }}</strong></div>
+          {% if tk %}
+            <div class="mf-ref-code">
+              <span data-i18n="pickup_code_label">Code de retrait</span> : <strong>{{ ref[-3:] }}</strong>
+            </div>
+            <div class="mf-ref-hint" data-i18n="pickup_code_hint">Au comptoir, donnez ce code ou le numéro complet.</div>
+          {% endif %}
+        {% else %}
+          <div class="mf-ref-number"><strong>#{{ order.id }}</strong></div>
+        {% endif %}
+        {% if tk and tk.pickup %}
+          <div class="mf-ref-pickup"><i class="bi bi-bag-check me-1"></i><span data-i18n="pickup_time_label">Retrait</span> :
+            {% if tk.asap %}<span data-i18n="pickup_asap">dès que possible</span> (~{{ tk.pickup }}){% else %}{{ tk.pickup }}{% endif %}
+          </div>
+        {% endif %}
+      </div>
 
       {% if order.status not in ['servie', 'annulee'] and order.estimated_prep_minutes %}
         <p class="small mb-3" style="color: var(--mf-accent-dark);">
@@ -120,7 +142,7 @@
   {% endif %}
 
   <a class="btn btn-outline-secondary w-100 mb-4" data-i18n="back_to_menu"
-     href="{{ url_for('public_menu', slug=restaurant.slug, t=order.table_label) if order.table_label else url_for('public_menu', slug=restaurant.slug) }}">
+     href="{{ url_for('public_menu', slug=restaurant.slug, t=order.table_label) if (order.table_label and not tk) else url_for('public_menu', slug=restaurant.slug) }}">
     <i class="bi bi-arrow-left me-1"></i> Retour au menu
   </a>
 </main>
@@ -148,3 +170,5 @@
   <span data-i18n="footer_powered">Propulsé par</span> <strong class="text-dark">MenuFlash Mini</strong>
 </footer>
 {% endblock %}
+
+

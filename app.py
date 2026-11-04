@@ -840,8 +840,10 @@ def log_menu_change(restaurant_id, user, action, description):
 
 
 def _order_to_dict(order):
+    from order_refs import client_reference
     return {
         "id": order.id,
+        "reference": client_reference(order.id),
         "status": order.status,
         "status_label": ORDER_STATUS_LABELS.get(order.status, order.status),
         "editable": order.status == EDITABLE_STATUS,
@@ -2067,6 +2069,9 @@ from profiles import init_profiles
 init_profiles(app, owner_required=owner_required, active_restaurant=active_restaurant,
               log_menu_change=log_menu_change)
 
+from order_refs import init_order_refs
+init_order_refs(app, order_hooks=ORDER_CREATED_HOOKS)
+
 from takeaway import init_takeaway
 init_takeaway(app, owner_required=owner_required, active_restaurant=active_restaurant,
               order_hooks=ORDER_CREATED_HOOKS)
@@ -2075,6 +2080,9 @@ from plans import init_plans
 init_plans(app, super_admin_required=super_admin_required,
            active_restaurant=active_restaurant, log_audit=log_audit)
 
+from tickets import init_tickets
+init_tickets(app, active_restaurant=active_restaurant)
+
 
 if __name__ == "__main__":
     with app.app_context():
@@ -2082,3 +2090,5 @@ if __name__ == "__main__":
         _ensure_schema_migrations()
         _ensure_security_defaults()
     app.run(debug=True, port=5000, host="0.0.0.0", threaded=True)
+
+

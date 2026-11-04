@@ -61,6 +61,12 @@ TRANSLATIONS = {
         "upsell_title": "Vous pourriez aussi aimer",
         "upsell_add_btn": "Ajouter",
         "upsell_nudge_prefix": "💡 Nos clients ajoutent souvent :",
+        "order_number": "Numéro de commande",
+        "pickup_code_label": "Code de retrait",
+        "pickup_code_hint": "Au comptoir, donnez ce code ou le numéro complet.",
+        "pickup_time_label": "Retrait",
+        "pickup_asap": "dès que possible",
+        "takeaway_badge": "À emporter",
     },
     "en": {
         "brand_tagline": "Choose your dishes and send your order",
@@ -117,5 +123,13 @@ TRANSLATIONS = {
         "upsell_title": "You might also like",
         "upsell_add_btn": "Add",
         "upsell_nudge_prefix": "💡 Customers often add:",
+        "order_number": "Order number",
+        "pickup_code_label": "Pickup code",
+        "pickup_code_hint": "At the counter, give this code or the full number.",
+        "pickup_time_label": "Pickup",
+        "pickup_asap": "as soon as possible",
+        "takeaway_badge": "Takeaway",
     },
 }
+
+
