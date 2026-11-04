@@ -1,87 +1,151 @@
 /*
- * MenuFlash Mini - choix « Sur place / À emporter » sur le menu client.
- * Le serveur revalide tout : ce script ne fait que l'affichage.
+ * MenuFlash Mini — fenêtre « Commande à emporter » du menu client.
  *
- * Protection anti-doublon : même si ce fichier est chargé plusieurs fois
- * (balise <script> en double dans base.html, cache…), un SEUL bloc est créé.
+ * Utilisée UNIQUEMENT sur le lien général du menu (data-order-mode="remote").
+ * Sur le QR code d'une table, la commande part directement en « sur place ».
+ *
+ * Parcours : panier -> récapitulatif -> « Continuer » -> cette fenêtre
+ * (prénom, téléphone, heure de retrait, email facultatif) -> « Confirmer la
+ * commande » -> page de suivi avec le numéro et le code de retrait.
+ *
+ * Les champs sont dans le formulaire de commande (#order-form) : ils partent
+ * avec la commande. Ce script ne fait que guider le client ; le serveur
+ * (takeaway.py) revérifie tout.
  */
 (function () {
   "use strict";
-  if (window.__mfTakeawayLoaded) return;          // script déjà chargé
+
+  if (window.__mfTakeawayLoaded) return;   // protection si le script est chargé deux fois
   window.__mfTakeawayLoaded = true;
 
-  var COUNTRIES = [["ML", "Mali (+223)"], ["SN", "Sénégal (+221)"], ["CI", "Côte d'Ivoire (+225)"],
-    ["BF", "Burkina Faso (+226)"], ["GN", "Guinée (+224)"], ["NE", "Niger (+227)"], ["MR", "Mauritanie (+222)"],
-    ["BJ", "Bénin (+229)"], ["TG", "Togo (+228)"], ["CM", "Cameroun (+237)"], ["MA", "Maroc (+212)"],
-    ["DZ", "Algérie (+213)"], ["TN", "Tunisie (+216)"], ["FR", "France (+33)"], ["BE", "Belgique (+32)"],
-    ["CH", "Suisse (+41)"], ["CA", "Canada (+1)"], ["US", "États-Unis (+1)"]];
+  var NAME_RE = /^\p{L}+(?:[ '’\-]\p{L}+)*$/u;
+
+  function t(key, fallback) {
+    return (window.MFTranslate && window.MFTranslate(key)) || fallback;
+  }
 
   function init() {
     var form = document.getElementById("order-form");
-    var slug = form && form.getAttribute("data-slug");
-    if (!form || !slug) return;
-    if (form.dataset.mfTakeaway) return;           // déjà initialisé
-    form.dataset.mfTakeaway = "loading";
-    fetch("/m/" + encodeURIComponent(slug) + "/a-emporter/config.json", { cache: "no-store" })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (c) { if (c && (c.enabled || c.paused)) build(form, c); })
-      .catch(function () {});
-  }
+    var modalEl = document.getElementById("mf-takeaway-modal");
+    if (!form || form.dataset.orderMode !== "remote" || !modalEl || typeof bootstrap === "undefined") return;
 
-  function build(form, c) {
-    // Dernière sécurité : si un bloc existe déjà dans le formulaire, on ne recrée rien.
-    if (form.querySelector(".mf-fulfillment")) return;
-    form.dataset.mfTakeaway = "ready";
+    var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    var nameInput = document.getElementById("tk-name");
+    var phoneInput = document.getElementById("tk-phone");
+    var emailInput = document.getElementById("tk-email");
+    var slotSelect = document.getElementById("tk-slot");
+    var errorBox = document.getElementById("mf-tk-error");
+    var summaryEl = document.getElementById("mf-tk-summary");
+    var confirmBtn = document.getElementById("mf-tk-confirm");
+    var labelEl = confirmBtn.querySelector(".confirm-label");
+    var spinnerEl = confirmBtn.querySelector(".spinner-border");
+    var coarse = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
 
-    var notes = document.getElementById("notes");
-    var anchor = notes ? notes.parentNode : null;
-    if (!anchor || !anchor.parentNode) return;
-    var atTable = !!(form.querySelector('[name="table_label"]') || {}).value;
-    var opts = COUNTRIES.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + "</option>"; }).join("");
-    var box = document.createElement("section");
-    box.className = "mf-fulfillment mt-4";
-    if (c.paused) {
-      box.innerHTML = '<div class="small text-secondary"><i class="bi bi-pause-circle me-1"></i>' +
-        "Les commandes à emporter sont suspendues pour le moment.</div>";
-      anchor.parentNode.insertBefore(box, anchor);
-      return;
+    var send = null;      // fonction d'envoi fournie par app.js
+    var busy = false;
+
+    /* ------------------------- Heure de retrait ------------------------- */
+    function pickupType() {
+      var checked = modalEl.querySelector('input[name="pickup_type"]:checked');
+      return checked ? checked.value : "";
     }
-    box.innerHTML =
-      '<div class="fw-bold mb-2">Comment souhaitez-vous recevoir votre commande ?</div>' +
-      '<div class="mf-fulfillment-choice">' +
-      '<label><input type="radio" name="fulfillment" value="table"' + (atTable ? " checked" : "") + '> Sur place</label>' +
-      '<label><input type="radio" name="fulfillment" value="takeaway"' + (atTable ? "" : " checked") + '> À emporter</label></div>' +
-      '<div class="mf-takeaway-fields mt-3"><div class="row g-2">' +
-      '<div class="col-6"><label class="form-label small mb-1" for="tk-name">Votre prénom</label>' +
-      '<input id="tk-name" class="form-control" name="customer_name" maxlength="60" autocomplete="given-name"></div>' +
-      '<div class="col-6"><label class="form-label small mb-1" for="tk-phone">Téléphone</label>' +
-      '<input id="tk-phone" class="form-control" type="tel" name="customer_phone" maxlength="30" autocomplete="tel-national" inputmode="tel"></div>' +
-      '<div class="col-12"><select class="form-select form-select-sm" name="customer_phone_country" aria-label="Pays du téléphone">' + opts + "</select></div>" +
-      '<div class="col-12"><label class="form-label small mb-1" for="tk-email">Email pour être prévenu quand c\'est prêt <span class="text-secondary">(optionnel)</span></label>' +
-      '<input id="tk-email" class="form-control" type="email" name="customer_email" maxlength="160" autocomplete="email" inputmode="email"></div>' +
-      '<div class="col-12"><label class="form-label small mb-1" for="tk-when">Retrait</label>' +
-      '<select id="tk-when" class="form-select" name="pickup_type">' +
-      (c.allow_asap ? '<option value="asap">Dès que possible (environ ' + c.prep_minutes + " min)</option>" : "") +
-      (c.allow_scheduled ? '<option value="scheduled">Choisir une heure</option>' : "") + "</select></div>" +
-      '<div class="col-12 d-none" data-pickup-wrap><input class="form-control" type="datetime-local" name="pickup_at" aria-label="Heure de retrait"></div>' +
-      '</div><div class="form-text mt-2">Paiement au retrait. Annulation possible tant que la préparation n\'a pas commencé.</div></div>';
-    anchor.parentNode.insertBefore(box, anchor);
-
-    var fields = box.querySelector(".mf-takeaway-fields");
-    var when = box.querySelector("[name=pickup_type]");
-    var wrap = box.querySelector("[data-pickup-wrap]");
-    var dt = box.querySelector("[name=pickup_at]");
-    if (c.now) dt.min = c.now;
-
-    function refresh() {
-      var take = box.querySelector("[name=fulfillment]:checked").value === "takeaway";
-      fields.classList.toggle("d-none", !take);
-      wrap.classList.toggle("d-none", !(take && when.value === "scheduled"));
-      // En mode « sur place », ces champs ne sont ni visibles ni envoyés.
-      fields.querySelectorAll("input, select").forEach(function (el) { el.disabled = !take; });
+    function syncPickup() {
+      if (!slotSelect) return;
+      var scheduled = pickupType() === "scheduled";
+      slotSelect.classList.toggle("d-none", !scheduled);
+      slotSelect.disabled = !scheduled;       // désactivé = non envoyé
+      slotSelect.required = scheduled;
+      if (scheduled && !coarse) slotSelect.focus();
     }
-    box.addEventListener("change", refresh);
-    refresh();
+    modalEl.querySelectorAll('input[name="pickup_type"]').forEach(function (r) {
+      r.addEventListener("change", syncPickup);
+    });
+    syncPickup();
+
+    /* ----------------------------- Erreurs ----------------------------- */
+    function showError(message) {
+      errorBox.textContent = message || t("tk_error_generic", "Une erreur est survenue. Réessayez.");
+      errorBox.classList.remove("d-none");
+      errorBox.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+    function hideError() {
+      errorBox.textContent = "";
+      errorBox.classList.add("d-none");
+    }
+
+    /* --------------------------- Vérifications --------------------------- */
+    nameInput.addEventListener("input", function () { nameInput.setCustomValidity(""); });
+    if (slotSelect) slotSelect.addEventListener("change", function () { slotSelect.setCustomValidity(""); });
+
+    function validate() {
+      var name = nameInput.value.replace(/\s+/g, " ").trim();
+      nameInput.value = name;
+      nameInput.setCustomValidity(name.length >= 2 && NAME_RE.test(name) ? "" : t("tk_err_name", "Indiquez votre prénom (lettres uniquement)."));
+      if (!nameInput.reportValidity()) return false;
+
+      // phone_field.js signale déjà un numéro invalide pour le pays choisi.
+      if (!phoneInput.value.trim()) phoneInput.setCustomValidity(t("tk_err_phone", "Indiquez votre numéro de téléphone."));
+      if (!phoneInput.reportValidity()) {
+        if (!phoneInput.value.trim()) phoneInput.setCustomValidity("");
+        return false;
+      }
+
+      if (pickupType() === "scheduled" && slotSelect) {
+        slotSelect.setCustomValidity(slotSelect.value ? "" : t("tk_err_slot", "Choisissez un créneau de retrait."));
+        if (!slotSelect.reportValidity()) return false;
+      }
+
+      emailInput.value = emailInput.value.trim();
+      return emailInput.reportValidity();
+    }
+
+    /* ------------------------------ Envoi ------------------------------ */
+    function setBusy(state) {
+      busy = state;
+      confirmBtn.disabled = state;
+      modalEl.querySelectorAll('[data-bs-dismiss="modal"]').forEach(function (b) { b.disabled = state; });
+      spinnerEl.classList.toggle("d-none", !state);
+      labelEl.textContent = state ? t("cart_sending", "Envoi…") : t("tk_confirm", "Confirmer la commande");
+    }
+
+    function submit() {
+      if (busy || !send) return;
+      hideError();
+      if (!validate()) return;
+      setBusy(true);
+      send().then(function (res) {
+        if (res && res.ok) return;           // app.js ouvre la page de suivi
+        setBusy(false);
+        if (res && res.handled) { modal.hide(); return; }
+        showError(res && res.error);
+      });
+    }
+
+    confirmBtn.addEventListener("click", submit);
+    // Entrée dans un champ = confirmer (et jamais un envoi classique du formulaire).
+    modalEl.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && e.target.tagName === "INPUT") {
+        e.preventDefault();
+        submit();
+      }
+    });
+    // Pas de fermeture pendant l'envoi.
+    modalEl.addEventListener("hide.bs.modal", function (e) { if (busy) e.preventDefault(); });
+    modalEl.addEventListener("shown.bs.modal", function () {
+      if (!coarse && !nameInput.value) nameInput.focus();
+    });
+
+    /* ------------------------- API pour app.js ------------------------- */
+    window.MFTakeaway = {
+      active: true,
+      open: function (sendFn, summary) {
+        send = sendFn;
+        summaryEl.textContent = summary || "";
+        hideError();
+        setBusy(false);
+        modal.show();
+      }
+    };
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
