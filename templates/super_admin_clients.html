@@ -64,14 +64,49 @@
       </form>
     </div>
 
+    <form method="post" action="{{ url_for('super_admin_bulk_actions') }}" id="sa-bulk-form" class="mf-confirm"
+          data-confirm-message="Appliquer cette action aux restaurants sélectionnés ?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="sa-bulk-bar d-none mb-3 p-2 rounded mf-sa-soft" id="sa-bulk-bar" aria-live="polite">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <strong class="small text-nowrap"><span id="sa-bulk-count">0</span> sélectionné(s)</strong>
+        <select name="action" id="sa-bulk-action" class="form-select form-select-sm w-auto" aria-label="Action groupée" required>
+          <option value="">Choisir une action…</option>
+          <optgroup label="Abonnement">
+            <option value="add_days">Offrir des jours</option>
+            <option value="change_plan">Changer l'offre</option>
+          </optgroup>
+          <optgroup label="Contrôle du service">
+            <option value="read_only_on">Mettre en lecture seule</option>
+            <option value="read_only_off">Réactiver les modifications</option>
+            <option value="block_orders">Bloquer les commandes</option>
+            <option value="unblock_orders">Débloquer les commandes</option>
+            <option value="suspend">Suspendre</option>
+            <option value="reactivate">Réactiver</option>
+          </optgroup>
+        </select>
+        <input type="number" name="days" class="form-control form-control-sm d-none sa-bulk-field" data-for="add_days" min="1" max="365" value="7" style="width: 90px;" aria-label="Nombre de jours">
+        <select name="plan" class="form-select form-select-sm w-auto d-none sa-bulk-field" data-for="change_plan" aria-label="Offre">
+          {% for k, v in plan_labels.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}
+        </select>
+        <input type="text" name="reason" class="form-control form-control-sm d-none sa-bulk-field" data-for="suspend read_only_on block_orders" maxlength="300" placeholder="Motif (visible par les restaurateurs)" style="min-width: 220px; flex: 1;">
+        <div class="form-check small mb-0 d-none sa-bulk-field" data-for="suspend reactivate read_only_on read_only_off block_orders unblock_orders">
+          <input class="form-check-input" type="checkbox" name="notify" value="1" id="sa-bulk-notify" checked>
+          <label class="form-check-label" for="sa-bulk-notify">Prévenir par email</label>
+        </div>
+        <button class="btn btn-sm btn-primary" type="submit">Appliquer</button>
+        <button class="btn btn-sm btn-link text-secondary" type="button" id="sa-bulk-clear">Tout désélectionner</button>
+      </div>
+    </div>
     <div class="table-responsive">
       <table class="table align-middle mb-0">
         <thead class="small text-secondary text-uppercase">
-          <tr><th>Restaurant</th><th>Gestionnaire</th><th>Offre</th><th>Statut</th><th>Expire le</th><th>Dernière connexion</th></tr>
+          <tr><th style="width: 34px;"><input class="form-check-input" type="checkbox" id="sa-bulk-all" aria-label="Tout sélectionner"></th><th>Restaurant</th><th>Gestionnaire</th><th>Offre</th><th>Statut</th><th>Expire le</th><th>Dernière connexion</th></tr>
         </thead>
         <tbody>
           {% for row in rows %}{% set r = row.r %}
             <tr>
+              <td><input class="form-check-input sa-bulk-check" type="checkbox" name="ids" value="{{ r.id }}" aria-label="Sélectionner {{ r.name }}"></td>
               <td><a class="fw-semibold" href="{{ url_for('super_admin_restaurant_detail', restaurant_id=r.id) }}">{{ r.name }}</a>
                 {% set rpf = (mf_restaurant_profiles or {}).get(r.id) %}
                 <div class="small text-secondary">/m/{{ r.slug }}{% if rpf and rpf.city %} · {{ rpf.city }}{% endif %}</div></td>
@@ -80,16 +115,62 @@
                 {{ row.owner.email if row.owner else '—' }}
                 {% if opf and opf.phone %}<div><a href="https://wa.me/{{ opf.phone|wa_number }}" target="_blank" rel="noopener"><i class="bi bi-whatsapp"></i> {{ opf.phone }}</a></div>{% endif %}</td>
               <td class="small">{{ plan_labels.get(r.subscription_plan, r.subscription_plan) }}</td>
-              <td><span class="badge {{ status_labels[row.status][1] }}">{{ status_labels[row.status][0] }}</span></td>
+              {% set rctl = (mf_sa_controls or {}).get(r.id) %}
+              <td><span class="badge {{ status_labels[row.status][1] }}">{{ status_labels[row.status][0] }}</span>
+                {% if rctl and rctl.read_only %}<span class="badge mf-sa-badge-warning" title="{{ rctl.reason or '' }}">Lecture seule</span>{% endif %}
+                {% if rctl and rctl.orders_blocked %}<span class="badge mf-sa-badge-warning" title="{{ rctl.reason or '' }}">Commandes bloquées</span>{% endif %}</td>
               <td class="small">{{ r.subscription_active_until.strftime('%d/%m/%Y') if r.subscription_active_until else '—' }}</td>
               <td class="small text-secondary">{{ row.owner.last_login_at.strftime('%d/%m/%Y %H:%M') if row.owner and row.owner.last_login_at else 'jamais' }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="6" class="text-secondary small">Aucun client ne correspond à ces critères.</td></tr>
+            <tr><td colspan="7" class="text-secondary small">Aucun client ne correspond à ces critères.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+    </form>
   </div></div>
 </div>
+<script>
+(function () {
+  "use strict";
+  var form = document.getElementById("sa-bulk-form");
+  if (!form) return;
+  var bar = document.getElementById("sa-bulk-bar");
+  var count = document.getElementById("sa-bulk-count");
+  var all = document.getElementById("sa-bulk-all");
+  var actionSel = document.getElementById("sa-bulk-action");
+  var checks = Array.prototype.slice.call(form.querySelectorAll(".sa-bulk-check"));
+
+  function refresh() {
+    var n = checks.filter(function (c) { return c.checked; }).length;
+    count.textContent = n;
+    bar.classList.toggle("d-none", n === 0);
+    all.checked = n > 0 && n === checks.length;
+    all.indeterminate = n > 0 && n < checks.length;
+  }
+  function syncFields() {
+    var a = actionSel.value;
+    form.querySelectorAll(".sa-bulk-field").forEach(function (f) {
+      var show = (f.getAttribute("data-for") || "").split(" ").indexOf(a) !== -1;
+      f.classList.toggle("d-none", !show);
+      if (f.name === "reason") f.required = show;
+    });
+  }
+  checks.forEach(function (c) { c.addEventListener("change", refresh); });
+  all.addEventListener("change", function () {
+    checks.forEach(function (c) { c.checked = all.checked; });
+    refresh();
+  });
+  document.getElementById("sa-bulk-clear").addEventListener("click", function () {
+    checks.forEach(function (c) { c.checked = false; });
+    refresh();
+  });
+  actionSel.addEventListener("change", syncFields);
+  syncFields();
+  refresh();
+})();
+</script>
 {% endblock %}
+
+

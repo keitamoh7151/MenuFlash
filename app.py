@@ -2083,6 +2083,9 @@ init_plans(app, super_admin_required=super_admin_required,
 from tickets import init_tickets
 init_tickets(app, active_restaurant=active_restaurant)
 
+from sa_controls import init_sa_controls
+init_sa_controls(app, super_admin_required=super_admin_required, log_audit=log_audit)
+
 
 if __name__ == "__main__":
     with app.app_context():
@@ -2090,5 +2093,7 @@ if __name__ == "__main__":
         _ensure_schema_migrations()
         _ensure_security_defaults()
     app.run(debug=True, port=5000, host="0.0.0.0", threaded=True)
+
+
 
 

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ restaurant.name }} — Menu indisponible{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex">{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card text-center p-4" style="max-width: 440px;">
+    <div class="card-body">
+      {% if restaurant.logo_url %}
+        <img src="{{ restaurant.logo_url }}" alt="" class="mb-3" style="width:64px;height:64px;object-fit:cover;border-radius:14px;">
+      {% else %}
+        <i class="bi bi-shop" style="font-size: 2.6rem; color: var(--mf-ink-soft, #6B6A66);"></i>
+      {% endif %}
+      <h1 class="h5 fw-bold mt-2 mb-2">{{ restaurant.name }}</h1>
+      <p class="mb-1">Le menu en ligne est temporairement indisponible.</p>
+      <p class="small text-secondary mb-0">Merci de commander directement auprès du personnel du restaurant.</p>
+      <hr class="my-3">
+      <p class="small text-secondary mb-0">The online menu is temporarily unavailable. Please order directly with the restaurant staff.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

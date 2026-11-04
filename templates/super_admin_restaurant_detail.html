@@ -9,7 +9,10 @@
     {% if r.logo_url %}<img src="{{ r.logo_url }}" alt="" class="mf-logo-preview" style="width:56px;height:56px;">{% endif %}
     <div class="flex-grow-1">
       <h1 class="h4 fw-bold mb-1">{{ r.name }}
-        <span class="badge {{ status_labels[status][1] }} align-middle ms-1">{{ status_labels[status][0] }}</span></h1>
+        <span class="badge {{ status_labels[status][1] }} align-middle ms-1">{{ status_labels[status][0] }}</span>
+        {% set hctl = (mf_sa_controls or {}).get(r.id) %}
+        {% if hctl and hctl.read_only %}<span class="badge mf-sa-badge-warning align-middle ms-1">Lecture seule</span>{% endif %}
+        {% if hctl and hctl.orders_blocked %}<span class="badge mf-sa-badge-warning align-middle ms-1">Commandes bloquées</span>{% endif %}</h1>
       <div class="small text-secondary">
         <a href="{{ url_for('public_menu', slug=r.slug) }}" target="_blank" rel="noopener">/m/{{ r.slug }}</a>
         · créé le {{ r.created_at.strftime('%d/%m/%Y') if r.created_at else '—' }}
@@ -171,14 +174,57 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="suspend">
             <label class="form-label small">Suspendre (motif visible par le restaurateur)</label>
             <input type="text" name="reason" class="form-control form-control-sm mb-2" maxlength="300" placeholder="Ex : abonnement impayé depuis le 1er novembre" required>
+            <div class="form-check small mb-2"><input class="form-check-input" type="checkbox" name="notify" value="1" id="sa-notify-suspend" checked>
+              <label class="form-check-label" for="sa-notify-suspend">Prévenir le gestionnaire par email</label></div>
             <button class="btn btn-sm btn-outline-danger w-100" type="submit"><i class="bi bi-pause-circle me-1"></i>Suspendre</button>
           </form>
         {% else %}
           <form method="post" action="{{ act }}" class="mb-2">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="reactivate">
+            <div class="form-check small mb-2"><input class="form-check-input" type="checkbox" name="notify" value="1" id="sa-notify-reactivate" checked>
+              <label class="form-check-label" for="sa-notify-reactivate">Prévenir le gestionnaire par email</label></div>
             <button class="btn btn-sm btn-success w-100" type="submit"><i class="bi bi-play-circle me-1"></i>Réactiver</button>
           </form>
         {% endif %}
+      </div></div>
+
+      {% set ctl = mf_sa_control_for(r.id) if mf_sa_control_for else None %}
+      {% set cact = url_for('super_admin_restaurant_controls', restaurant_id=r.id) %}
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-1">Contrôle du service</h2>
+        <p class="small text-secondary mb-3">Des mesures plus douces que la suspension : le restaurant continue de fonctionner en partie.</p>
+        {% if ctl and ctl.reason and (ctl.orders_blocked or ctl.read_only) %}
+          <div class="alert alert-warning small py-2">Motif affiché au restaurateur : « {{ ctl.reason }} »
+            {% if ctl.updated_by %}<div class="text-secondary">par {{ ctl.updated_by }}{% if ctl.updated_at %} le {{ ctl.updated_at.strftime('%d/%m/%Y %H:%M') }}{% endif %}</div>{% endif %}</div>
+        {% endif %}
+
+        {% for key, on, title, help, on_label, off_label, icon in [
+          ('read_only', ctl and ctl.read_only, 'Lecture seule', "Plus aucune modification (menu, équipe, réglages). Les commandes continuent et la cuisine les traite.", 'Activer la lecture seule', 'Réactiver les modifications', 'lock'),
+          ('orders', ctl and ctl.orders_blocked, 'Commandes en ligne', "Le menu reste visible en consultation, mais aucune commande n'est acceptée.", 'Bloquer les commandes', 'Débloquer les commandes', 'cart-x')] %}
+          <div class="border rounded p-2 mb-2">
+            <div class="d-flex justify-content-between align-items-center gap-2">
+              <strong class="small"><i class="bi bi-{{ icon }} me-1"></i>{{ title }}</strong>
+              {% if key == 'read_only' %}
+                <span class="badge {{ 'mf-sa-badge-warning' if on else 'mf-sa-badge-ok' }}">{{ 'Lecture seule' if on else 'Modifications permises' }}</span>
+              {% else %}
+                <span class="badge {{ 'mf-sa-badge-warning' if on else 'mf-sa-badge-ok' }}">{{ 'Bloquées' if on else 'Ouvertes' }}</span>
+              {% endif %}
+            </div>
+            <div class="small text-secondary my-1">{{ help }}</div>
+            {% set act_on = 'read_only_on' if key == 'read_only' else 'block_orders' %}
+            {% set act_off = 'read_only_off' if key == 'read_only' else 'unblock_orders' %}
+            <form method="post" action="{{ cact }}" class="mf-confirm" data-confirm-message="{{ (off_label if on else on_label) ~ ' ?' }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="{{ act_off if on else act_on }}">
+              {% if not on %}
+                <input type="text" name="reason" class="form-control form-control-sm mb-2" maxlength="300" required placeholder="Motif (visible par le restaurateur)">
+              {% endif %}
+              <div class="form-check small mb-2"><input class="form-check-input" type="checkbox" name="notify" value="1" id="sa-n-{{ key }}" checked>
+                <label class="form-check-label" for="sa-n-{{ key }}">Prévenir le gestionnaire par email</label></div>
+              <button class="btn btn-sm {{ 'btn-success' if on else 'btn-outline-warning' }} w-100" type="submit">{{ off_label if on else on_label }}</button>
+            </form>
+          </div>
+        {% endfor %}
       </div></div>
 
       <div class="card mf-section-card border-danger-subtle"><div class="card-body">
@@ -259,3 +305,5 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% endblock %}
+
+
