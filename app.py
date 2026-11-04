@@ -2086,6 +2086,8 @@ init_tickets(app, active_restaurant=active_restaurant)
 from sa_controls import init_sa_controls
 init_sa_controls(app, super_admin_required=super_admin_required, log_audit=log_audit)
 
+from hardening import init_hardening
+init_hardening(app, log_audit=log_audit)
 
 if __name__ == "__main__":
     with app.app_context():
