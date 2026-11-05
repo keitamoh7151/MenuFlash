@@ -2,7 +2,6 @@
 {% block title %}Codes QR — {{ restaurant.name }}{% endblock %}
 {% block content %}
 {% include "_admin_navbar.html" %}
-
 <div class="container py-4" style="max-width: 1040px;">
   <div class="alert alert-light border d-flex gap-2 mb-4">
     <i class="bi bi-info-circle-fill flex-shrink-0 mt-1" style="color: var(--mf-accent);"></i>
@@ -16,6 +15,41 @@
       activées, ce lien affiche votre menu en consultation seulement.
     </div>
   </div>
+
+  {% if mf_qr_compact %}
+  <div class="card mf-section-card mb-4">
+    <div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-1">Autocollants à imprimer</h2>
+      <p class="small text-secondary mb-3">
+        Le QR code est imprimé en <strong>petit autocollant</strong> (40 × 50 mm) pour ne pas encombrer la table :
+        imprimez la planche, découpez sur les traits et collez. Sur une feuille A4, 20 autocollants tiennent d'un coup.
+      </p>
+      {% if qrcodes %}
+      <form method="get" action="{{ url_for('admin_qrcodes_sheet') }}" target="_blank" class="d-flex flex-wrap align-items-end gap-3">
+        <div>
+          <label for="sheet-size" class="form-label small fw-semibold mb-1">Taille</label>
+          <select id="sheet-size" name="taille" class="form-select form-select-sm" style="min-width: 250px;">
+            <option value="petit" selected>Petit : 40 × 50 mm (recommandé)</option>
+            <option value="mini">Mini : 32 × 42 mm (très discret)</option>
+            <option value="moyen">Moyen : 55 × 62 mm</option>
+          </select>
+        </div>
+        <div class="form-check mb-1">
+          <input class="form-check-input" type="checkbox" name="general" value="1" id="sheet-general">
+          <label class="form-check-label small" for="sheet-general">Ajouter le QR général (à emporter)</label>
+        </div>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-file-earmark-pdf me-1"></i>Planche de toutes les tables ({{ qrcodes|length }})</button>
+      </form>
+      {% else %}
+        <p class="small text-secondary mb-0">Créez d'abord un QR code de table ci-dessous : la planche les réunira tous.</p>
+      {% endif %}
+      <div class="form-text mt-2">
+        Imprimez à <strong>100 %</strong> (taille réelle), sans « Ajuster à la page » : la règle de 5 cm en bas de la feuille doit mesurer 5 cm.
+        Choisissez « Mini » seulement si vos clients scannent de près.
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="card mf-section-card mb-4">
     <div class="card-body">
@@ -31,7 +65,10 @@
             <i class="bi bi-clipboard me-1"></i>Copier le lien
           </button>
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('menu_qrcode', slug=restaurant.slug) }}">Image PNG</a>
-          <a class="btn btn-primary btn-sm" href="{{ url_for('menu_qrcode_pdf', slug=restaurant.slug) }}"><i class="bi bi-file-earmark-pdf me-1"></i>Chevalet PDF</a>
+          <a class="btn btn-primary btn-sm" href="{{ url_for('menu_qrcode_pdf', slug=restaurant.slug) }}" target="_blank" rel="noopener"><i class="bi bi-file-earmark-pdf me-1"></i>{{ 'QR petit (PDF)' if mf_qr_compact else 'Chevalet PDF' }}</a>
+          {% if mf_qr_compact %}
+            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('menu_qrcode_pdf', slug=restaurant.slug, taille='chevalet') }}" target="_blank" rel="noopener" title="Ancien format A6 (105 × 148 mm)">Chevalet A6</a>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -40,7 +77,7 @@
   <div class="card mf-section-card mb-4">
     <div class="card-body">
       <h2 class="mf-section-title fs-6 mb-3">Ajouter un code QR pour une table</h2>
-      <p class="small text-secondary">Créez un QR code par table et imprimez son chevalet : c'est ce code qui permet au client de commander sur place.</p>
+      <p class="small text-secondary">Créez un QR code par table et imprimez son autocollant : c'est ce code qui permet au client de commander sur place.</p>
       <form method="post" action="{{ url_for('admin_qrcodes_add') }}" class="d-flex gap-2 flex-wrap">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="text" name="label" class="form-control" maxlength="50" style="max-width: 280px;" placeholder="Ex : Table 5, Terrasse 2…" required>
@@ -98,7 +135,10 @@
                 <i class="bi bi-clipboard me-1"></i>Copier
               </button>
               <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('table_qrcode_png', slug=restaurant.slug, qr_id=qr.id) }}">Image PNG</a>
-              <a class="btn btn-primary btn-sm" href="{{ url_for('table_qrcode_pdf', slug=restaurant.slug, qr_id=qr.id) }}"><i class="bi bi-file-earmark-pdf me-1"></i>Chevalet PDF</a>
+              <a class="btn btn-primary btn-sm" href="{{ url_for('table_qrcode_pdf', slug=restaurant.slug, qr_id=qr.id) }}" target="_blank" rel="noopener"><i class="bi bi-file-earmark-pdf me-1"></i>{{ 'QR petit (PDF)' if mf_qr_compact else 'Chevalet PDF' }}</a>
+              {% if mf_qr_compact %}
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('table_qrcode_pdf', slug=restaurant.slug, qr_id=qr.id, taille='chevalet') }}" target="_blank" rel="noopener" title="Ancien format A6 (105 × 148 mm)">Chevalet A6</a>
+              {% endif %}
               <form method="post" action="{{ url_for('admin_qrcodes_delete', qr_id=qr.id) }}"
                     class="mf-confirm d-inline" data-confirm-message="Supprimer ce QR code ?">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -114,7 +154,3 @@
   </div>
 </div>
 {% endblock %}
-
-
-
-

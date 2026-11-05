@@ -2090,6 +2090,9 @@ from table_limits import init_table_limits
 init_table_limits(app, owner_required=owner_required,
                   active_restaurant=active_restaurant, log_audit=log_audit)
 
+from qr_compact import init_qr_compact
+init_qr_compact(app, owner_required=owner_required, active_restaurant=active_restaurant)
+
 from hardening import init_hardening
 init_hardening(app, log_audit=log_audit)
 
