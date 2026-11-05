@@ -23,7 +23,7 @@ Dès qu'une commande passe en « En préparation », elle ne compte plus.
                       Par table (sur place)     À emporter
   Valeur par défaut   10                        15
   Minimum             2                         3
-  Plafond             30                        50
+  Plafond             30                        200
   Variable Render     MAX_PENDING_ORDERS_PER_TABLE   MAX_PENDING_TAKEAWAY
   Plafond (Render)    ..._PER_TABLE_CEILING          MAX_PENDING_TAKEAWAY_CEILING
 
@@ -59,9 +59,9 @@ KINDS = {
         "what": "commandes en attente par table",
     },
     "takeaway": {
-        "env": "MAX_PENDING_TAKEAWAY", "default": 15, "low": 3, "high": 100,
-        "ceiling_env": "MAX_PENDING_TAKEAWAY_CEILING", "ceiling_default": 50,
-        "ceiling_low": 5, "ceiling_high": 100,
+        "env": "MAX_PENDING_TAKEAWAY", "default": 15, "low": 3, "high": 200,
+        "ceiling_env": "MAX_PENDING_TAKEAWAY_CEILING", "ceiling_default": 200,
+        "ceiling_low": 5, "ceiling_high": 500,
         "column": "max_pending_takeaway", "field": "max_pending_takeaway",
         "audit": "takeaway_limit_changed",
         "what": "commandes à emporter en attente",
@@ -122,6 +122,17 @@ def get_table_limit(restaurant_id):
 def get_takeaway_limit(restaurant_id):
     """Commandes à emporter en attente, pour tout le restaurant (utilisé par security_plus.py)."""
     return get_limit(restaurant_id, "takeaway")
+
+
+def restaurant_wide_limit(restaurant_id, base):
+    """Limite globale de commandes en attente pour tout le restaurant (sur place + emporter).
+    Elle ne doit jamais être plus basse que la limite à emporter du restaurant : sinon un
+    fast-food réglé à 200 serait bloqué à 80."""
+    try:
+        return max(base, get_takeaway_limit(restaurant_id))
+    except Exception:
+        db.session.rollback()
+        return base
 
 
 def pending_takeaway_count(restaurant_id, since):

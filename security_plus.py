@@ -96,6 +96,15 @@ def _env_int(name, default, low, high):
 MAX_PENDING_ORDERS_PER_TABLE = _env_int("MAX_PENDING_ORDERS_PER_TABLE", 10, 2, 50)
 MAX_PENDING_ORDERS_PER_RESTAURANT = _env_int("MAX_PENDING_ORDERS_PER_RESTAURANT", 80, 10, 500)
 
+def _restaurant_limit(restaurant_id):
+    """Commandes en attente maximum pour tout le restaurant : jamais moins que sa limite à emporter."""
+    try:
+        from table_limits import restaurant_wide_limit
+        return restaurant_wide_limit(restaurant_id, MAX_PENDING_ORDERS_PER_RESTAURANT)
+    except Exception:
+        return MAX_PENDING_ORDERS_PER_RESTAURANT
+
+
 def _takeaway_over_limit(restaurant_id, since):
     """True si le restaurant a déjà atteint sa limite de commandes à emporter en attente
     (réglable par le gestionnaire, table_limits.py). Ne bloque jamais le service en cas d'erreur."""
@@ -879,7 +888,7 @@ def init_security_plus(app, *, limiter, log_audit, owner_required, active_restau
             qr = QRCode.query.filter_by(id=qr_id, restaurant_id=r.id).first()
             table = qr.label if qr else table
         message = None
-        if pending.count() >= MAX_PENDING_ORDERS_PER_RESTAURANT:
+        if pending.count() >= _restaurant_limit(r.id):
             message = "Le restaurant reçoit beaucoup de commandes en ce moment. Réessayez dans quelques minutes."
         elif (not table and request.form.get("fulfillment") == "takeaway"
               and _takeaway_over_limit(r.id, since)):
