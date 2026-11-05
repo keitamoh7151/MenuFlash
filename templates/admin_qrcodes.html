@@ -49,6 +49,35 @@
     </div>
   </div>
 
+  <div class="card mf-section-card mb-4">
+    <div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-1">Commandes en attente par table</h2>
+      <p class="small text-secondary">
+        Pour éviter les fausses commandes, une table ne peut pas envoyer de nouvelle commande quand trop de ses
+        commandes attendent déjà d'être prises en charge par la cuisine (sur les 15 dernières minutes).
+        Dès qu'une commande passe en « En préparation », elle ne compte plus. Augmentez cette limite si de
+        grandes tables commandent depuis plusieurs téléphones.
+      </p>
+      {% if mf_table_limit %}
+      <form method="post" action="{{ url_for('admin_table_limit') }}" class="d-flex flex-wrap align-items-end gap-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div>
+          <label for="max-pending-table" class="form-label small fw-semibold mb-1">Commandes en attente maximum par table</label>
+          <input type="number" id="max-pending-table" name="max_pending_per_table" class="form-control"
+                 style="width: 140px;" min="{{ mf_table_limit.min }}" max="{{ mf_table_limit.ceiling }}" step="1"
+                 inputmode="numeric" value="{{ mf_table_limit.value }}" required>
+        </div>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Enregistrer</button>
+        {% if mf_table_limit.custom %}
+          <button type="submit" name="action" value="reset" class="btn btn-outline-secondary" formnovalidate>
+            Rétablir la valeur par défaut ({{ mf_table_limit.default }})</button>
+        {% endif %}
+      </form>
+      <div class="form-text">De {{ mf_table_limit.min }} à {{ mf_table_limit.ceiling }}. Valeur par défaut : {{ mf_table_limit.default }}.</div>
+      {% endif %}
+    </div>
+  </div>
+
   <div class="card mf-section-card">
     <div class="card-body">
       <h2 class="mf-section-title fs-6 mb-3">Codes QR par table</h2>
@@ -85,5 +114,7 @@
   </div>
 </div>
 {% endblock %}
+
+
 
 

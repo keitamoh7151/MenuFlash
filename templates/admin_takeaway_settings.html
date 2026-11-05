@@ -12,6 +12,23 @@
 <div class="col-md-4"><label class="form-label">Préparation minimale</label><div class="input-group"><input class="form-control" type="number" min="5" max="180" name="prep_minutes" value="{{ settings.prep_minutes }}"><span class="input-group-text">min</span></div></div>
 <div class="col-md-4"><label class="form-label">Intervalle des créneaux</label><div class="input-group"><input class="form-control" type="number" min="5" max="60" name="slot_minutes" value="{{ settings.slot_minutes }}"><span class="input-group-text">min</span></div></div>
 <div class="col-md-4"><label class="form-label">Maximum par créneau</label><input class="form-control" type="number" min="1" max="50" name="max_per_slot" value="{{ settings.max_per_slot }}"></div></div>
-<button class="btn btn-primary mt-4" type="submit">Enregistrer</button></div></form></div>{% endblock %}
+<button class="btn btn-primary mt-4" type="submit">Enregistrer</button></div></form>
+<div class="card mf-section-card mt-4"><div class="card-body">
+<h2 class="mf-section-title fs-6 mb-1">Commandes à emporter en attente</h2>
+<p class="small text-secondary">Pour éviter les fausses commandes et ne pas submerger la cuisine, le lien général n'accepte plus de nouvelle commande à emporter quand trop de commandes attendent déjà d'être prises en charge (sur les 15 dernières minutes). Dès qu'une commande passe en « En préparation », elle ne compte plus. Le client voit alors un message l'invitant à réessayer dans quelques minutes.</p>
+{% if mf_takeaway_limit %}
+<form method="post" action="{{ url_for('admin_takeaway_limit') }}" class="d-flex flex-wrap align-items-end gap-2">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div><label for="max-pending-takeaway" class="form-label small fw-semibold mb-1">Commandes à emporter en attente maximum</label>
+<input type="number" id="max-pending-takeaway" name="max_pending_takeaway" class="form-control" style="width:140px" min="{{ mf_takeaway_limit.min }}" max="{{ mf_takeaway_limit.ceiling }}" step="1" inputmode="numeric" value="{{ mf_takeaway_limit.value }}" required></div>
+<button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Enregistrer</button>
+{% if mf_takeaway_limit.custom %}<button type="submit" name="action" value="reset" class="btn btn-outline-secondary" formnovalidate>Rétablir la valeur par défaut ({{ mf_takeaway_limit.default }})</button>{% endif %}
+</form>
+<div class="form-text">De {{ mf_takeaway_limit.min }} à {{ mf_takeaway_limit.ceiling }}. Valeur par défaut : {{ mf_takeaway_limit.default }}. Le maximum par créneau de retrait se règle ci-dessus.</div>
+{% endif %}
+</div></div>
+</div>{% endblock %}
+
+
 
 

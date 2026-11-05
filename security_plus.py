@@ -96,6 +96,27 @@ def _env_int(name, default, low, high):
 MAX_PENDING_ORDERS_PER_TABLE = _env_int("MAX_PENDING_ORDERS_PER_TABLE", 10, 2, 50)
 MAX_PENDING_ORDERS_PER_RESTAURANT = _env_int("MAX_PENDING_ORDERS_PER_RESTAURANT", 80, 10, 500)
 
+def _takeaway_over_limit(restaurant_id, since):
+    """True si le restaurant a déjà atteint sa limite de commandes à emporter en attente
+    (réglable par le gestionnaire, table_limits.py). Ne bloque jamais le service en cas d'erreur."""
+    try:
+        from table_limits import get_takeaway_limit, pending_takeaway_count
+        return pending_takeaway_count(restaurant_id, since) >= get_takeaway_limit(restaurant_id)
+    except Exception:
+        db.session.rollback()
+        return False
+
+
+def _table_limit(restaurant_id):
+    """Limite de commandes en attente par table : réglage du restaurant (table_limits.py),
+    sinon valeur par défaut. Ne bloque jamais le service si le module est absent."""
+    try:
+        from table_limits import get_table_limit
+        return get_table_limit(restaurant_id)
+    except Exception:
+        return MAX_PENDING_ORDERS_PER_TABLE
+
+
 DEVICE_COOKIE = "mf_dev"
 PWNED_TIMEOUT = 2.5
 PWNED_CACHE_SECONDS = 3600
@@ -860,13 +881,18 @@ def init_security_plus(app, *, limiter, log_audit, owner_required, active_restau
         message = None
         if pending.count() >= MAX_PENDING_ORDERS_PER_RESTAURANT:
             message = "Le restaurant reçoit beaucoup de commandes en ce moment. Réessayez dans quelques minutes."
-        elif table and pending.filter(Order.table_label == table).count() >= MAX_PENDING_ORDERS_PER_TABLE:
+        elif (not table and request.form.get("fulfillment") == "takeaway"
+              and _takeaway_over_limit(r.id, since)):
+            message = ("Le restaurant a beaucoup de commandes à emporter en attente. "
+                       "Réessayez dans quelques minutes.")
+        elif table and pending.filter(Order.table_label == table).count() >= _table_limit(r.id):
             message = ("Plusieurs commandes de votre table attendent déjà d'être prises en charge. "
                        "Patientez un instant ou appelez un serveur.")
         if not message:
             return None
         log_audit("order_flood_blocked", success=False, restaurant_id=r.id, user_email=None,
-                  details=f"table={table or '—'} ip={client_ip()}")
+                  details=f"table={table or '—'} ip={client_ip()}"
+                          + (" (à emporter)" if not table else ""))
         if wants_json():
             return jsonify({"ok": False, "error": message}), 429
         flash(message, "error")
@@ -881,5 +907,7 @@ def init_security_plus(app, *, limiter, log_audit, owner_required, active_restau
         return Response(f"<!doctype html><meta charset='utf-8'><title>Trop de demandes</title>"
                         f"<p style='font-family:sans-serif;max-width:480px;margin:80px auto;text-align:center'>"
                         f"{message}</p>", 429, {"Retry-After": "60"})
+
+
 
 
