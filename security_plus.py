@@ -83,8 +83,18 @@ MAX_IMAGES_MB_PER_RESTAURANT = 60
 ORDER_LIMIT_PER_CLIENT = "6 per 10 minutes;20 per hour"
 ORDER_LIMIT_PER_IP = "60 per 10 minutes"
 ADD_TO_ORDER_LIMIT_PER_CLIENT = "15 per 10 minutes"
-MAX_PENDING_ORDERS_PER_TABLE = 4     # commandes « nouvelles » d'une même table sur 15 min
-MAX_PENDING_ORDERS_PER_RESTAURANT = 80
+def _env_int(name, default, low, high):
+    try:
+        return max(low, min(int(os.environ.get(name, default)), high))
+    except (TypeError, ValueError):
+        return default
+
+
+# Commandes « Nouvelle » (pas encore prises en charge par la cuisine) sur 15 min.
+# Une table de plusieurs convives peut commander depuis plusieurs téléphones : 4 était
+# trop strict. Réglable sans modifier le code (Render > Environment).
+MAX_PENDING_ORDERS_PER_TABLE = _env_int("MAX_PENDING_ORDERS_PER_TABLE", 10, 2, 50)
+MAX_PENDING_ORDERS_PER_RESTAURANT = _env_int("MAX_PENDING_ORDERS_PER_RESTAURANT", 80, 10, 500)
 
 DEVICE_COOKIE = "mf_dev"
 PWNED_TIMEOUT = 2.5
@@ -871,3 +881,5 @@ def init_security_plus(app, *, limiter, log_audit, owner_required, active_restau
         return Response(f"<!doctype html><meta charset='utf-8'><title>Trop de demandes</title>"
                         f"<p style='font-family:sans-serif;max-width:480px;margin:80px auto;text-align:center'>"
                         f"{message}</p>", 429, {"Retry-After": "60"})
+
+
