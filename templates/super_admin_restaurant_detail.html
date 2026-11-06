@@ -3,6 +3,7 @@
 {% block content %}
 {% include "_super_admin_navbar.html" %}
 {% set r = restaurant %}
+{% set adm = sa_admin if sa_admin is defined else true %}
 <div class="container py-4" style="max-width: 1180px;">
 
   <div class="d-flex flex-wrap align-items-center gap-3 mb-4">
@@ -55,7 +56,7 @@
       <div class="card mf-section-card mb-3"><div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h2 class="mf-section-title fs-6 mb-0">Abonnement & paiements</h2>
-          <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#sa-payment-modal"><i class="bi bi-cash-coin me-1"></i>Enregistrer un paiement</button>
+          {% if adm %}<button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#sa-payment-modal"><i class="bi bi-cash-coin me-1"></i>Enregistrer un paiement</button>{% endif %}
         </div>
         {% if payments %}
           <div class="table-responsive"><table class="table table-sm align-middle mb-0">
@@ -129,10 +130,12 @@
     </div>
 
     <div class="col-lg-5">
+      {% include "_sa_ops_card.html" %}
+      {% set act = url_for('super_admin_restaurant_action', restaurant_id=r.id) %}
+      {% if adm or (sa_can is defined and sa_can('super_admin_restaurant_action', 'unlock')) %}
       <div class="card mf-section-card mb-3"><div class="card-body">
         <h2 class="mf-section-title fs-6 mb-3">Actions rapides</h2>
-        {% set act = url_for('super_admin_restaurant_action', restaurant_id=r.id) %}
-
+        {% if adm %}
         <form method="post" action="{{ act }}" class="d-flex gap-2 mb-2">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="add_days">
           <input type="number" name="days" class="form-control form-control-sm" min="1" max="365" value="7" aria-label="Jours">
@@ -147,6 +150,8 @@
           <button class="btn btn-sm btn-outline-secondary text-nowrap" type="submit">Changer l'offre</button>
         </form>
 
+        {% endif %}
+
         <div class="d-grid gap-2 mb-3">
           {% for action, icon, label, msg in [
             ('unlock', 'unlock', 'Débloquer les comptes', 'Débloquer tous les comptes verrouillés de ce restaurant ?'),
@@ -159,6 +164,7 @@
           {% endfor %}
         </div>
 
+        {% if adm %}
         <form method="post" action="{{ act }}" class="mb-3 mf-confirm" data-confirm-message="Transférer la propriété ? L'ancien email ne pourra plus se connecter.">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="transfer">
           <label class="form-label small">Transférer la propriété à un nouvel email</label>
@@ -186,8 +192,11 @@
             <button class="btn btn-sm btn-success w-100" type="submit"><i class="bi bi-play-circle me-1"></i>Réactiver</button>
           </form>
         {% endif %}
+        {% endif %}
       </div></div>
+      {% endif %}
 
+      {% if adm %}
       {% set ctl = mf_sa_control_for(r.id) if mf_sa_control_for else None %}
       {% set cact = url_for('super_admin_restaurant_controls', restaurant_id=r.id) %}
       <div class="card mf-section-card mb-3"><div class="card-body">
@@ -245,6 +254,7 @@
           </form>
         {% endif %}
       </div></div>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -305,5 +315,7 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% endblock %}
+
+
 
 

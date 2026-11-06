@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Importer un menu — {{ restaurant.name }}{% endblock %}
+{% block content %}
+{% include "_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 860px;">
+  <div class="mb-3">
+    <h1 class="h4 fw-bold mb-1">Importer mon menu depuis un fichier</h1>
+    <div class="small text-secondary">Remplissez un tableau Excel au lieu de saisir vos plats un par un. Vous verrez un aperçu avant que quoi que ce soit soit enregistré.</div>
+  </div>
+
+  <div class="card mf-section-card mb-3"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-3">1. Téléchargez le modèle</h2>
+    <p class="small text-secondary">Une ligne par plat. Remplacez les exemples par vos plats. Colonnes : <strong>Catégorie</strong>, <strong>Plat</strong> (obligatoire),
+      <strong>Prix</strong> (obligatoire, en francs entiers), Description, Préparation (min), Disponible (oui/non).</p>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-primary btn-sm" href="{{ url_for('admin_menu_import_template_xlsx') }}"><i class="bi bi-file-earmark-excel me-1"></i>Modèle Excel (.xlsx)</a>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_menu_import_template_csv') }}"><i class="bi bi-filetype-csv me-1"></i>Modèle CSV</a>
+    </div>
+  </div></div>
+
+  <div class="card mf-section-card mb-3"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-3">2. Envoyez votre fichier</h2>
+    <form method="post" action="{{ url_for('admin_menu_import_preview') }}" enctype="multipart/form-data" data-mf-guard>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="form-label small fw-semibold" for="mi-file">Fichier Excel (.xlsx) ou CSV</label>
+      <div class="mb-3"><input type="file" id="mi-file" name="file" class="form-control" accept=".xlsx,.csv,.txt" required></div>
+      <div class="mb-3">
+        <div class="form-label small fw-semibold">Si un plat existe déjà (même nom dans la même catégorie)</div>
+        <div class="form-check"><input class="form-check-input" type="radio" name="mode" id="mi-skip" value="skip" checked>
+          <label class="form-check-label small" for="mi-skip"><strong>L'ignorer</strong> (recommandé) : vos plats actuels ne changent pas.</label></div>
+        <div class="form-check"><input class="form-check-input" type="radio" name="mode" id="mi-update" value="update">
+          <label class="form-check-label small" for="mi-update"><strong>Le mettre à jour</strong> : le prix change, et la description, la préparation et la disponibilité si le fichier les renseigne. Les photos et les allergènes ne sont jamais touchés.</label></div>
+      </div>
+      <button class="btn btn-primary" type="submit"><i class="bi bi-eye me-1"></i>Voir l'aperçu</button>
+    </form>
+  </div></div>
+
+  <div class="alert alert-light border small d-flex gap-2 mb-0">
+    <i class="bi bi-info-circle-fill mt-1" style="color: var(--mf-accent);"></i>
+    <div>
+      Maximum <strong>{{ max_rows }} lignes</strong> et 1 Mo par fichier. Votre formule permet {{ max_items }} plats ;
+      il vous en reste <strong>{{ free_items }}</strong> à ajouter.
+      Les photos et les allergènes s'ajoutent ensuite, plat par plat, depuis votre menu.
+    </div>
+  </div>
+</div>
+{% endblock %}

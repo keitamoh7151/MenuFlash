@@ -54,7 +54,7 @@
             <a href="{{ url_for('super_admin_security_log') }}">{{ failed_24h }} connexion(s) échouée(s) sur 24 h</a></li>
           <li class="{{ 'is-danger' if errors_24h else '' }}"><i class="bi bi-bug"></i>
             <a href="{{ url_for('super_admin_health') }}">{{ errors_24h }} erreur(s) de l'application sur 24 h</a></li>
-          <li class="{{ 'is-warn' if inactive_count else '' }}"><i class="bi bi-moon"></i>{{ inactive_count }} restaurant(s) sans commande depuis 7 jours</li>
+          <li class="{{ 'is-warn' if inactive_count else '' }}"><i class="bi bi-moon"></i>{{ inactive_count }} restaurant(s) sans commande depuis {{ risk_days }} jour(s)</li>
         </ul>
       </div></div>
     </div>
@@ -74,13 +74,13 @@
     </div>
     <div class="col-lg-6">
       <div class="card mf-section-card h-100"><div class="card-body">
-        <h2 class="mf-section-title fs-6 mb-3">Clients à risque (aucune commande depuis 7 jours)</h2>
+        <h2 class="mf-section-title fs-6 mb-3">Clients à risque (aucune commande depuis {{ risk_days }} jour(s))</h2>
         {% for r in inactive %}
           <div class="d-flex justify-content-between border-bottom py-2 small">
             <a href="{{ url_for('super_admin_restaurant_detail', restaurant_id=r.id) }}">{{ r.name }}</a>
             <span class="text-secondary">{{ plan_labels.get(r.subscription_plan, r.subscription_plan) }}</span>
           </div>
-        {% else %}<p class="text-secondary small mb-0">Tous les restaurants actifs ont reçu des commandes cette semaine.</p>{% endfor %}
+        {% else %}<p class="text-secondary small mb-0">Tous les restaurants actifs ont reçu des commandes ces {{ risk_days }} derniers jours.</p>{% endfor %}
       </div></div>
     </div>
   </div>
@@ -102,3 +102,5 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% endblock %}
+
+

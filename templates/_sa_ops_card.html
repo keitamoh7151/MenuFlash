@@ -1,0 +1,57 @@
+{# Carte « Santé d'activité » de la fiche client (incluse par super_admin_restaurant_detail.html).
+   Données : sa_health.py (contexte mf_sa_ops). #}
+{% if mf_sa_ops and mf_sa_ops.h %}
+{% set h = mf_sa_ops.h %}
+<div class="card mf-section-card mb-3"><div class="card-body">
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <h2 class="mf-section-title fs-6 mb-0 me-auto">Santé d'activité</h2>
+    <span class="badge {{ h.level_color }}">{{ h.level_label }}</span>
+    {% if h.account_type != 'client' %}<span class="badge {{ mf_sa_ops.badges[h.account_type] }}">{{ mf_sa_ops.types[h.account_type] }}</span>{% endif %}
+  </div>
+  <div class="row g-2 small mb-3">
+    <div class="col-6"><div class="text-secondary">Dernière commande</div>
+      <strong>{% if h.last_order %}{{ h.last_order|sa_ago }}{% else %}aucune{% endif %}</strong></div>
+    <div class="col-6"><div class="text-secondary">Commandes 7 j / 30 j</div><strong>{{ h.orders_7d }} / {{ h.orders_30d }}</strong></div>
+    <div class="col-6"><div class="text-secondary">Dernière activité d'un compte</div><strong>{{ h.last_activity|sa_ago }}</strong></div>
+    <div class="col-6"><div class="text-secondary">Installation</div><strong>{{ h.steps_done }} / {{ h.steps_total }} étapes</strong></div>
+  </div>
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    {% for s in h.steps %}
+      <span class="badge {{ 'mf-sa-badge-ok' if s.done else 'mf-sa-badge-muted' }}"><i class="bi {{ 'bi-check-lg' if s.done else 'bi-circle' }} me-1"></i>{{ s.label }}</span>
+    {% endfor %}
+  </div>
+
+  <h3 class="small fw-bold text-uppercase text-secondary mb-2">Diagnostic</h3>
+  <ul class="list-unstyled small mb-3">
+    {% for i in mf_sa_ops.issues %}
+      <li class="d-flex gap-2 mb-2">
+        <i class="bi {{ {'danger': 'bi-x-octagon-fill text-danger', 'warning': 'bi-exclamation-triangle-fill text-warning', 'info': 'bi-info-circle-fill text-primary', 'ok': 'bi-check-circle-fill text-success'}[i.level] }} mt-1"></i>
+        <div>{{ i.text }}{% if i.hint %}<div class="text-secondary">{{ i.hint }}</div>{% endif %}</div>
+      </li>
+    {% endfor %}
+  </ul>
+
+  {% if sa_can('super_admin_support_view') %}
+    <a class="btn btn-sm btn-primary w-100 mb-2" href="{{ url_for('super_admin_support_view', restaurant_id=restaurant.id) }}">
+      <i class="bi bi-life-preserver me-1"></i>Vue support (lecture seule)</a>
+    <div class="small text-secondary mb-0">Voir son menu, ses commandes, son équipe et ses réglages sans vous connecter à son compte.</div>
+  {% endif %}
+
+  {% if sa_admin %}
+  <hr>
+  <form method="post" action="{{ url_for('super_admin_restaurant_type', restaurant_id=restaurant.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="form-label small fw-semibold" for="sa-account-type">Type de compte</label>
+    <div class="d-flex gap-2 mb-2">
+      <select id="sa-account-type" name="account_type" class="form-select form-select-sm">
+        {% for key, label in mf_sa_ops.types.items() %}<option value="{{ key }}" {{ 'selected' if h.account_type == key }}>{{ label }}</option>{% endfor %}
+      </select>
+      <button class="btn btn-sm btn-outline-secondary text-nowrap" type="submit">Enregistrer</button>
+    </div>
+    <input type="text" name="note" class="form-control form-control-sm" maxlength="300" value="{{ h.type_note or '' }}"
+           placeholder="Note (ex : pilote gratuit jusqu'au 30/11, contact : Awa)" aria-label="Note sur le type de compte">
+    <div class="form-text">« Pilote offert » et « Démo » ne comptent plus dans le revenu mensuel récurrent ; « Démo » est aussi exclu de la conversion.</div>
+  </form>
+  {% endif %}
+</div></div>
+{% endif %}

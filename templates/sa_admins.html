@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Équipe d'administration — Super-admin{% endblock %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 1040px;">
+  <div class="mb-3">
+    <h1 class="h4 fw-bold mb-1">Équipe d'administration</h1>
+    <div class="small text-secondary">Donnez accès au panel à un collaborateur sans lui donner tous les droits. Chaque compte a sa propre connexion et sa double authentification.</div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    {% for key, (label, desc, badge) in roles.items() %}
+      <div class="col-md-4"><div class="card mf-section-card h-100"><div class="card-body">
+        <span class="badge {{ badge }} mb-2">{{ label }}</span>
+        <div class="small text-secondary">{{ desc }}</div>
+      </div></div></div>
+    {% endfor %}
+  </div>
+
+  {% if last_invite %}
+    <div class="card mf-section-card mb-3 border-success-subtle"><div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-2"><i class="bi bi-envelope-check me-1 text-success"></i>Invitation envoyée à {{ last_invite.email }}</h2>
+      <p class="small text-secondary mb-2">Si l'email n'arrive pas, envoyez ce lien à la personne (WhatsApp). Valable 72 heures, à usage unique. <strong>Ce lien n'est affiché qu'une seule fois.</strong></p>
+      <div class="input-group input-group-sm">
+        <input type="text" class="form-control" value="{{ last_invite.link }}" readonly aria-label="Lien d'invitation">
+        <button class="btn btn-outline-secondary mf-copy-btn" type="button" data-copy-text="{{ last_invite.link }}"><i class="bi bi-clipboard me-1"></i>Copier</button>
+      </div>
+    </div></div>
+  {% endif %}
+
+  <div class="card mf-section-card mb-4"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-3">Comptes ({{ rows|length }})</h2>
+    {% for row in rows %}{% set u = row.user %}
+      <div class="border rounded p-3 mb-2 {{ 'bg-light' if row.state == 'disabled' }}">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <div class="me-auto">
+            <strong>{{ (row.meta.display_name if row.meta and row.meta.display_name else u.email) }}</strong>
+            {% if row.me %}<span class="badge mf-sa-badge-muted">vous</span>{% endif %}
+            <span class="badge {{ roles[row.role][2] if row.role in roles else 'mf-sa-badge-danger' }}">{{ roles[row.role][0] if row.role in roles else 'Sans rôle' }}</span>
+            {% if row.state == 'disabled' %}<span class="badge mf-sa-badge-muted">désactivé</span>
+            {% elif row.state == 'pending' %}<span class="badge mf-sa-badge-warning">invitation en attente</span>
+            {% else %}<span class="badge mf-sa-badge-ok">actif</span>{% endif %}
+            <div class="small text-secondary">{{ u.email }} · dernière connexion {{ u.last_login_at|sa_ago if u.last_login_at else 'jamais' }}
+              · 2FA : {{ 'activée' if row.two_factor else 'non configurée' }}</div>
+          </div>
+          {% if row.state == 'pending' %}
+            <form method="post" action="{{ url_for('super_admin_admin_resend', user_id=u.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary" type="submit"><i class="bi bi-arrow-repeat me-1"></i>Renvoyer</button>
+            </form>
+          {% endif %}
+        </div>
+        {% if not row.me %}
+        <details class="mt-2">
+          <summary class="small text-secondary">Gérer ce compte</summary>
+          <div class="row g-2 mt-1 align-items-end">
+            <form method="post" action="{{ url_for('super_admin_admin_role', user_id=u.id) }}" class="col-md-7 d-flex flex-wrap gap-2 align-items-end">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div><label class="form-label small mb-1">Rôle</label>
+                <select name="role" class="form-select form-select-sm">
+                  {% for key, (label, desc, badge) in roles.items() %}<option value="{{ key }}" {{ 'selected' if row.role == key }}>{{ label }}</option>{% endfor %}
+                </select></div>
+              <div><label class="form-label small mb-1">Votre mot de passe</label>
+                <input type="password" name="confirm_password" class="form-control form-control-sm" autocomplete="current-password" required></div>
+              <button class="btn btn-sm btn-outline-secondary" type="submit">Changer le rôle</button>
+            </form>
+            <form method="post" action="{{ url_for('super_admin_admin_enable' if row.state == 'disabled' else 'super_admin_admin_disable', user_id=u.id) }}"
+                  class="col-md-5 d-flex flex-wrap gap-2 align-items-end">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div><label class="form-label small mb-1">Votre mot de passe</label>
+                <input type="password" name="confirm_password" class="form-control form-control-sm" autocomplete="current-password" required></div>
+              <button class="btn btn-sm {{ 'btn-outline-success' if row.state == 'disabled' else 'btn-outline-danger' }}" type="submit">
+                {{ 'Réactiver' if row.state == 'disabled' else 'Désactiver (déconnexion immédiate)' }}</button>
+            </form>
+          </div>
+        </details>
+        {% endif %}
+      </div>
+    {% endfor %}
+    {% if admins_left <= 1 %}<div class="small text-secondary mt-2"><i class="bi bi-shield-check me-1"></i>Il doit toujours rester au moins un administrateur actif : le dernier ne peut être ni rétrogradé ni désactivé.</div>{% endif %}
+  </div></div>
+
+  <div class="card mf-section-card"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-1">Inviter un collaborateur</h2>
+    <p class="small text-secondary">La personne reçoit un email pour choisir elle-même son mot de passe, puis configure la double authentification. Vous ne connaissez jamais son mot de passe.</p>
+    <form method="post" action="{{ url_for('super_admin_admin_invite') }}" class="row g-2 align-items-end" data-mf-guard autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="col-md-4"><label class="form-label small" for="sa-inv-email">Email</label>
+        <input type="email" id="sa-inv-email" name="email" class="form-control" maxlength="120" autocomplete="off" required></div>
+      <div class="col-md-3"><label class="form-label small" for="sa-inv-name">Nom (optionnel)</label>
+        <input type="text" id="sa-inv-name" name="name" class="form-control" maxlength="80"></div>
+      <div class="col-md-3"><label class="form-label small" for="sa-inv-role">Rôle</label>
+        <select id="sa-inv-role" name="role" class="form-select" required>
+          {% for key, (label, desc, badge) in roles.items() %}<option value="{{ key }}" {{ 'selected' if key == 'support' }}>{{ label }}</option>{% endfor %}
+        </select></div>
+      <div class="col-md-4"><label class="form-label small" for="sa-inv-pwd">Votre mot de passe</label>
+        <input type="password" id="sa-inv-pwd" name="confirm_password" class="form-control" autocomplete="current-password" required></div>
+      <div class="col-md-3"><button class="btn btn-primary w-100" type="submit"><i class="bi bi-send me-1"></i>Inviter</button></div>
+    </form>
+  </div></div>
+</div>
+{% endblock %}

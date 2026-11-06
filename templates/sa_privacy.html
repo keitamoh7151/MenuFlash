@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Données personnelles — Super-admin{% endblock %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 1180px;">
+  <div class="mb-3">
+    <h1 class="h4 fw-bold mb-1">Demandes de données personnelles</h1>
+    <div class="small text-secondary">Un client demande ce que vous savez de lui, ou veut que ses données soient supprimées (loi malienne n° 2013-015). Recherchez-le, exportez ou effacez.</div>
+  </div>
+
+  <div class="card mf-section-card mb-3"><div class="card-body">
+    <form method="post" action="{{ url_for('super_admin_privacy') }}" class="row g-2 align-items-end" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="col-md-8">
+        <label class="form-label small fw-semibold" for="pv-q">Téléphone, email ou prénom du client</label>
+        <input type="text" id="pv-q" name="q" class="form-control" maxlength="120" value="{{ q or '' }}" required
+               placeholder="Ex : +223 76 12 34 56, awa@exemple.com ou Awa" spellcheck="false">
+        <div class="form-text">Téléphone : au moins 7 chiffres. Email : adresse exacte. Prénom : peut renvoyer plusieurs personnes, cochez les bonnes lignes.</div>
+      </div>
+      <div class="col-md-4"><button class="btn btn-primary w-100" type="submit"><i class="bi bi-search me-1"></i>Rechercher</button></div>
+    </form>
+  </div></div>
+
+  {% if searched %}
+  <div class="card mf-section-card mb-3"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-3">Commandes à emporter trouvées ({{ rows|length }}{{ '+' if rows|length >= max_results }})</h2>
+    {% if rows %}
+    <form method="post" id="pv-form" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="q" value="{{ q }}">
+      <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead class="small text-secondary"><tr><th style="width:30px;"><input class="form-check-input" type="checkbox" id="pv-all" checked aria-label="Tout cocher"></th>
+          <th>Date</th><th>Restaurant</th><th>Référence</th><th>Client</th><th>Articles</th><th class="text-end">Total</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+          <tr class="small {{ 'text-secondary' if r.erased }}">
+            <td><input class="form-check-input pv-check" type="checkbox" name="ids" value="{{ r.id }}" {{ 'checked' if not r.erased }} {{ 'disabled' if r.erased }}></td>
+            <td class="text-nowrap">{{ r.created|sa_dt }}</td>
+            <td>{{ r.restaurant }}</td>
+            <td>{% if r.ref %}<code>{{ r.ref }}</code>{% else %}#{{ r.id }}{% endif %}</td>
+            <td><strong>{{ r.name }}</strong>
+              {% if r.phone %}<div>{{ r.phone }}</div>{% endif %}{% if r.email %}<div>{{ r.email }}</div>{% endif %}
+              {% if r.erased %}<span class="badge mf-sa-badge-muted">déjà effacé</span>{% endif %}</td>
+            <td>{% for a in r.articles %}{{ a.quantite }}× {{ a.nom }}{{ ', ' if not loop.last }}{% endfor %}
+              {% if r.notes %}<div class="text-secondary">Remarque : {{ r.notes }}</div>{% endif %}</td>
+            <td class="text-end text-nowrap">{{ '{:,}'.format(r.total).replace(',', ' ') }} {{ r.currency }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-md-5">
+          <div class="p-3 rounded mf-sa-soft h-100">
+            <h3 class="h6 fw-bold"><i class="bi bi-download me-1"></i>Exporter</h3>
+            <p class="small text-secondary">Fichier JSON des lignes cochées (et des comptes trouvés), à transmettre à la personne qui en a fait la demande.</p>
+            <button class="btn btn-outline-secondary btn-sm" type="submit" formaction="{{ url_for('super_admin_privacy_export') }}">Télécharger l'export</button>
+          </div>
+        </div>
+        <div class="col-md-7">
+          <div class="p-3 rounded border border-danger-subtle h-100">
+            <h3 class="h6 fw-bold text-danger"><i class="bi bi-eraser-fill me-1"></i>Effacer (anonymiser) les lignes cochées</h3>
+            <p class="small text-secondary">Prénom, téléphone, email, remarque et avis sont effacés ; le lien de suivi cesse de fonctionner. Le montant et les articles restent pour les statistiques du restaurant. <strong>Irréversible.</strong></p>
+            <div class="row g-2">
+              <div class="col-6"><input type="text" name="confirm" class="form-control form-control-sm" placeholder="Tapez EFFACER" autocomplete="off" spellcheck="false"></div>
+              <div class="col-6"><input type="password" name="confirm_password" class="form-control form-control-sm" placeholder="Votre mot de passe" autocomplete="current-password"></div>
+              <div class="col-12"><input type="text" name="note" class="form-control form-control-sm" maxlength="200" placeholder="Note pour l'historique (sans donnée personnelle) : ex. demande reçue par WhatsApp le 12/11"></div>
+              <div class="col-12"><button class="btn btn-danger btn-sm" type="submit" formaction="{{ url_for('super_admin_privacy_erase') }}">Effacer les lignes cochées</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
+    {% else %}
+      <p class="small text-secondary mb-0">Aucune commande à emporter ne correspond à cette recherche.</p>
+    {% endif %}
+  </div></div>
+
+  <div class="card mf-section-card mb-3"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-2">Comptes correspondants (gestionnaires et équipes)</h2>
+    {% if accounts %}
+      <table class="table table-sm align-middle mb-2"><thead class="small text-secondary"><tr><th>Email</th><th>Nom</th><th>Rôle</th><th>Restaurant</th></tr></thead><tbody>
+      {% for a in accounts %}
+        <tr class="small"><td>{{ a.user.email }}</td>
+          <td>{% if a.profile %}{{ [a.profile.first_name, a.profile.last_name]|select|join(' ') }}{% endif %}</td>
+          <td>{{ 'Gestionnaire' if a.user.role == 'owner' else 'Équipe' }}</td>
+          <td>{% if a.restaurant %}<a href="{{ url_for('super_admin_restaurant_detail', restaurant_id=a.restaurant.id) }}">{{ a.restaurant.name }}</a>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody></table>
+      <div class="small text-secondary">Ces comptes ne sont pas supprimés ici : fermez le compte depuis la fiche du client (archivage puis suppression définitive).</div>
+    {% else %}
+      <p class="small text-secondary mb-0">Aucun compte ne correspond.</p>
+    {% endif %}
+  </div></div>
+  {% endif %}
+
+  <div class="row g-3">
+    <div class="col-lg-8">
+      <div class="card mf-section-card h-100"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Historique des demandes traitées</h2>
+        <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="small text-secondary"><tr><th>Date</th><th>Traité par</th><th>Action</th><th>Recherche</th><th>Lignes</th><th>Note</th></tr></thead>
+          <tbody>
+          {% for h in history %}
+            <tr class="small">
+              <td class="text-nowrap">{{ h.created_at|sa_dt }}</td><td>{{ h.handled_by }}</td>
+              <td><span class="badge {{ 'mf-sa-badge-danger' if h.kind == 'erase' else 'mf-sa-badge-info' }}">{{ 'Effacement' if h.kind == 'erase' else 'Export' }}</span></td>
+              <td>{{ kind_labels[h.subject_kind] }} <code title="Empreinte (HMAC) de la recherche : preuve sans donnée personnelle">{{ h.subject_hash[:8] }}</code></td>
+              <td>{{ h.orders_count }}</td><td>{{ h.note or '' }}</td>
+            </tr>
+          {% else %}<tr><td colspan="6" class="small text-secondary">Aucune demande traitée pour l'instant.</td></tr>{% endfor %}
+          </tbody>
+        </table></div>
+        <div class="small text-secondary mt-2">L'historique ne conserve ni le téléphone, ni l'email, ni le prénom : seulement une empreinte qui prouve que la demande a été traitée.</div>
+      </div></div>
+    </div>
+    <div class="col-lg-4">
+      <div class="card mf-section-card h-100"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Effacement automatique</h2>
+        <p class="small">Le téléphone et l'email des clients « à emporter » sont effacés automatiquement <strong>{{ retention.days }} jours</strong> après le retrait.</p>
+        <div class="d-flex justify-content-between small border-top pt-2"><span>Lignes en retard d'effacement</span>
+          <span class="badge {{ 'mf-sa-badge-ok' if not retention.overdue else 'mf-sa-badge-warning' }}">{{ retention.overdue }}</span></div>
+        <div class="small text-secondary mt-2">Réglable avec la variable <code>CUSTOMER_DATA_DAYS</code> (Render).</div>
+      </div></div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var all = document.getElementById("pv-all");
+  if (!all) return;
+  all.addEventListener("change", function () {
+    document.querySelectorAll(".pv-check:not(:disabled)").forEach(function (c) { c.checked = all.checked; });
+  });
+})();
+</script>
+{% endblock %}

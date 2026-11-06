@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% block title %}Vue support — {{ restaurant.name }}{% endblock %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+{% set r = restaurant %}
+<div class="container py-4" style="max-width: 1180px;">
+
+  <div class="alert alert-info d-flex gap-2 small mb-3" role="note">
+    <i class="bi bi-eye-fill mt-1"></i>
+    <div><strong>Vue support en lecture seule.</strong> Vous voyez les données de ce restaurant sans vous connecter à son compte
+      et sans pouvoir rien modifier. Chaque consultation est enregistrée dans le journal de sécurité. Les téléphones et emails
+      des clients sont masqués.</div>
+  </div>
+
+  <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+    {% if r.logo_url %}<img src="{{ r.logo_url }}" alt="" class="mf-logo-preview" style="width:52px;height:52px;">{% endif %}
+    <div class="flex-grow-1">
+      <h1 class="h4 fw-bold mb-1">{{ r.name }}
+        <span class="badge {{ status_label[1] }} align-middle ms-1">{{ status_label[0] }}</span>
+        <span class="badge {{ h.level_color }} align-middle">{{ h.level_label }}</span>
+        {% if h.account_type != 'client' %}<span class="badge mf-sa-badge-muted align-middle">{{ {'pilot': 'Pilote offert', 'demo': 'Démo / test'}[h.account_type] }}</span>{% endif %}
+      </h1>
+      <div class="small text-secondary">
+        <a href="{{ url_for('public_menu', slug=r.slug) }}" target="_blank" rel="noopener">/m/{{ r.slug }}</a>
+        · offre {{ plan_label }} · fin d'abonnement {{ r.subscription_active_until.strftime('%d/%m/%Y') if r.subscription_active_until else '—' }}
+        · dernière activité {{ h.last_activity|sa_ago }}
+      </div>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('super_admin_restaurant_detail', restaurant_id=r.id) }}"><i class="bi bi-arrow-left me-1"></i>Fiche client</a>
+  </div>
+
+  <ul class="nav nav-pills mb-3 flex-wrap gap-1">
+    {% for key, label, icon in tabs %}
+      <li class="nav-item"><a class="nav-link {{ 'active' if tab == key }}" href="{{ url_for('super_admin_support_view', restaurant_id=r.id, onglet=key) }}"><i class="bi {{ icon }} me-1"></i>{{ label }}</a></li>
+    {% endfor %}
+  </ul>
+
+  {# ================================ RÉSUMÉ ================================ #}
+  {% if tab == 'resume' %}
+  <div class="row g-3">
+    <div class="col-lg-7">
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Diagnostic</h2>
+        <ul class="list-unstyled small mb-0">
+          {% for i in issues %}
+            <li class="d-flex gap-2 mb-2">
+              <i class="bi {{ {'danger': 'bi-x-octagon-fill text-danger', 'warning': 'bi-exclamation-triangle-fill text-warning', 'info': 'bi-info-circle-fill text-primary', 'ok': 'bi-check-circle-fill text-success'}[i.level] }} mt-1"></i>
+              <div>{{ i.text }}{% if i.hint %}<div class="text-secondary">{{ i.hint }}</div>{% endif %}</div>
+            </li>
+          {% endfor %}
+        </ul>
+      </div></div>
+      <div class="card mf-section-card"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Formule et limites</h2>
+        <table class="table table-sm align-middle mb-0">
+          <thead class="small text-secondary"><tr><th>Fonctionnalité</th><th>Valeur</th><th>Utilisé</th></tr></thead>
+          <tbody>
+          {% for f in features %}
+            <tr class="small"><td>{{ f.label }}</td>
+              <td>{% if f.kind == 'bool' %}<span class="badge {{ 'mf-sa-badge-ok' if f.value else 'mf-sa-badge-muted' }}">{{ 'Oui' if f.value else 'Non' }}</span>{% else %}{{ f.value }}{% endif %}</td>
+              <td>{% if f.usage is not none %}{{ f.usage }}{% else %}—{% endif %}</td></tr>
+          {% else %}<tr><td colspan="3" class="small text-secondary">Indisponible.</td></tr>{% endfor %}
+          </tbody>
+        </table>
+      </div></div>
+    </div>
+    <div class="col-lg-5">
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Indicateurs</h2>
+        <div class="row g-2 small">
+          <div class="col-6"><div class="text-secondary">Dernière commande</div><strong>{% if h.last_order %}{{ h.last_order|sa_dt }}<br><span class="text-secondary fw-normal">{{ h.last_order|sa_ago }}</span>{% else %}aucune{% endif %}</strong></div>
+          <div class="col-6"><div class="text-secondary">Commandes 7 j / 30 j / total</div><strong>{{ h.orders_7d }} / {{ h.orders_30d }} / {{ h.orders_total }}</strong></div>
+          <div class="col-6"><div class="text-secondary">Plats (disponibles)</div><strong>{{ h.dishes }} ({{ h.dishes_available }})</strong></div>
+          <div class="col-6"><div class="text-secondary">Catégories</div><strong>{{ h.categories }}</strong></div>
+          <div class="col-6"><div class="text-secondary">QR codes (scans)</div><strong>{{ h.qr_count }} ({{ h.qr_scans }})</strong></div>
+          <div class="col-6"><div class="text-secondary">Comptes d'équipe</div><strong>{{ h.staff_count }}</strong></div>
+          <div class="col-6"><div class="text-secondary">Dernière connexion du gestionnaire</div><strong>{{ h.owner_last_login|sa_ago }}</strong></div>
+          <div class="col-6"><div class="text-secondary">Inscrit</div><strong>{{ h.created_at|sa_dt }}</strong></div>
+        </div>
+      </div></div>
+      <div class="card mf-section-card"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">État du service</h2>
+        <div class="d-flex justify-content-between small border-bottom py-2"><span>Compte</span>
+          <span class="badge {{ status_label[1] }}">{{ status_label[0] }}</span></div>
+        <div class="d-flex justify-content-between small border-bottom py-2"><span>Lecture seule (super-admin)</span>
+          <strong>{{ 'oui' if control and control.read_only else 'non' }}</strong></div>
+        <div class="d-flex justify-content-between small border-bottom py-2"><span>Commandes bloquées (super-admin)</span>
+          <strong>{{ 'oui' if control and control.orders_blocked else 'non' }}</strong></div>
+        {% if control and control.reason and (control.read_only or control.orders_blocked) %}
+          <div class="small text-secondary py-1">Motif : « {{ control.reason }} »</div>
+        {% endif %}
+        <div class="d-flex justify-content-between small py-2"><span>Ouverture (horaires)</span>
+          <strong>{% if opening %}{{ 'ouvert' if opening.open else ('commandes suspendues' if opening.reason == 'suspended' else 'fermé') }}{% else %}—{% endif %}</strong></div>
+      </div></div>
+    </div>
+  </div>
+
+  {# ================================ MENU ================================ #}
+  {% elif tab == 'menu' %}
+  {% if categories %}
+    {% for c in categories %}
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <h2 class="h6 fw-bold mb-0">{{ c.name }}</h2><span class="badge mf-sa-badge-muted">{{ c.items|length }}</span>
+          {% if c.is_paused %}<span class="badge mf-sa-badge-warning">en pause · masquée aux clients</span>{% endif %}
+        </div>
+        <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="small text-secondary"><tr><th>Plat</th><th class="text-end">Prix</th><th>Prép.</th><th>Photo</th><th>Disponibilité</th></tr></thead>
+          <tbody>
+          {% for i in c.items %}
+            <tr class="small {{ 'text-secondary' if not i.is_available }}">
+              <td><strong>{{ i.name }}</strong>{% if i.description %}<div class="text-secondary">{{ i.description }}</div>{% endif %}</td>
+              <td class="text-end text-nowrap">{{ '{:,}'.format(i.price).replace(',', ' ') }} {{ restaurant.currency }}</td>
+              <td>{{ i.prep_minutes }} min</td>
+              <td>{% if i.photo_url %}<i class="bi bi-image-fill text-success"></i>{% else %}<i class="bi bi-image text-secondary"></i>{% endif %}</td>
+              <td><span class="badge {{ 'mf-sa-badge-ok' if i.is_available else 'mf-sa-badge-danger' }}">{{ 'Disponible' if i.is_available else 'Épuisé' }}</span></td>
+            </tr>
+          {% else %}<tr><td colspan="5" class="small text-secondary">Catégorie vide.</td></tr>{% endfor %}
+          </tbody>
+        </table></div>
+      </div></div>
+    {% endfor %}
+  {% else %}
+    <div class="card mf-section-card"><div class="card-body text-center text-secondary py-5">Le menu est vide.</div></div>
+  {% endif %}
+
+  {# ================================ COMMANDES ================================ #}
+  {% elif tab == 'commandes' %}
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    {% for key, label in order_statuses %}
+      <a class="btn btn-sm {{ 'btn-primary' if status == key else 'btn-outline-secondary' }}"
+         href="{{ url_for('super_admin_support_view', restaurant_id=r.id, onglet='commandes', statut=key) }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <div class="card mf-section-card"><div class="card-body">
+    <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="small text-secondary"><tr><th>Référence</th><th>Date</th><th>Table / client</th><th>Articles</th><th class="text-end">Total</th><th>Statut</th></tr></thead>
+      <tbody>
+      {% for row in orders %}{% set o = row.order %}
+        <tr class="small">
+          <td class="text-nowrap">{% if row.ref %}<code>{{ row.ref }}</code>{% else %}#{{ o.id }}{% endif %}</td>
+          <td class="text-nowrap">{{ row.created }}</td>
+          <td>
+            {% if row.takeaway %}
+              <span class="badge mf-sa-badge-info">À emporter</span> <strong>{{ row.takeaway.name }}</strong>
+              <div class="text-secondary">{{ row.takeaway.phone }} · retrait {{ 'dès que possible' if row.takeaway.asap else '' }} {{ row.takeaway.pickup }}</div>
+            {% else %}{{ o.table_label or 'Sans table' }}{% endif %}
+          </td>
+          <td>{{ row.summary }}{% if o.notes %}<div class="text-secondary">Remarque : {{ o.notes }}</div>{% endif %}</td>
+          <td class="text-end text-nowrap">{{ '{:,}'.format(o.total).replace(',', ' ') }}</td>
+          <td><span class="badge {{ 'mf-sa-badge-danger' if o.status == 'annulee' else ('mf-sa-badge-ok' if o.status == 'servie' else 'mf-sa-badge-warning') }}">{{ o.status|replace('_', ' ') }}</span>
+            {% if o.status == 'annulee' and o.cancelled_by %}<div class="text-secondary">par {{ o.cancelled_by }}</div>{% endif %}</td>
+        </tr>
+      {% else %}<tr><td colspan="6" class="small text-secondary">Aucune commande{{ ' avec ce statut' if status }}.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+    <div class="small text-secondary mt-2">Les {{ orders|length }} dernières commandes. Téléphones des clients masqués.</div>
+  </div></div>
+
+  {# ================================ ÉQUIPE ================================ #}
+  {% elif tab == 'equipe' %}
+  <div class="card mf-section-card"><div class="card-body">
+    <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="small text-secondary"><tr><th>Compte</th><th>Rôle</th><th>État</th><th>Dernière connexion</th><th>Dernière activité</th><th>Sécurité</th></tr></thead>
+      <tbody>
+      {% for t in team %}{% set u = t.user %}
+        <tr class="small">
+          <td>{% if t.name %}<strong>{{ t.name }}</strong><br>{% endif %}{{ u.email }}{% if not u.email_verified %} <span class="badge mf-sa-badge-muted">non vérifié</span>{% endif %}</td>
+          <td>{{ 'Gestionnaire' if u.role == 'owner' else ({'cuisine': 'Cuisine', 'serveur': 'Serveur'}[t.job] if t.job else 'Équipe') }}</td>
+          <td><span class="badge {{ 'mf-sa-badge-ok' if t.state == 'Actif' else ('mf-sa-badge-warning' if t.state == 'Invitation en attente' else 'mf-sa-badge-muted') }}">{{ t.state }}</span></td>
+          <td>{{ u.last_login_at|sa_dt if u.last_login_at else 'jamais' }}</td>
+          <td>{{ t.seen|sa_ago }}</td>
+          <td>{% if t.locked %}<span class="badge mf-sa-badge-danger">verrouillé</span>{% elif u.failed_login_attempts %}<span class="badge mf-sa-badge-warning">{{ u.failed_login_attempts }} échec(s)</span>{% else %}<span class="badge mf-sa-badge-ok">OK</span>{% endif %}</td>
+        </tr>
+      {% else %}<tr><td colspan="6" class="small text-secondary">Aucun compte.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+    <div class="small text-secondary mt-2">Pour débloquer un compte ou envoyer un lien de réinitialisation, utilisez la fiche client.</div>
+  </div></div>
+
+  {# ================================ RÉGLAGES ================================ #}
+  {% else %}
+  <div class="row g-3">
+    <div class="col-lg-6">
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Profil et apparence</h2>
+        <div class="small">
+          <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Thème</span><strong>{{ restaurant.theme }}</strong></div>
+          <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Logo</span><strong>{{ 'oui' if restaurant.logo_url else 'non' }}</strong></div>
+          <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Devise · langue</span><strong>{{ restaurant.currency }} · {{ restaurant.language }}</strong></div>
+          {% if profile %}
+            <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Ville · quartier</span><strong>{{ [profile.city, profile.district]|select|join(' · ') or '—' }}</strong></div>
+            <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Adresse</span><strong class="text-end">{{ profile.address or '—' }}</strong></div>
+            <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Numéro affiché aux clients</span><strong>{{ profile.public_phone or '—' }}</strong></div>
+            <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Cuisine · tables</span><strong>{{ profile.cuisine or '—' }} · {{ profile.table_count if profile.table_count is not none else '—' }}</strong></div>
+            {% if profile.description %}<div class="py-1"><span class="text-secondary">Description</span><div>{{ profile.description }}</div></div>{% endif %}
+          {% else %}<div class="text-secondary py-1">Profil non renseigné.</div>{% endif %}
+        </div>
+      </div></div>
+      <div class="card mf-section-card"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Limites anti-abus</h2>
+        {% if limits %}
+          <div class="small">
+            <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Commandes « Nouvelle » max par table</span><strong>{{ limits.table }}</strong></div>
+            <div class="d-flex justify-content-between py-1"><span class="text-secondary">Commandes à emporter en attente max</span><strong>{{ limits.takeaway }}</strong></div>
+          </div>
+        {% else %}<div class="small text-secondary">Limites réglables non installées (valeurs par défaut).</div>{% endif %}
+      </div></div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Horaires d'ouverture</h2>
+        {% if hours and hours.enabled %}
+          <table class="table table-sm mb-0"><tbody>
+          {% for d in range(7) %}<tr class="small"><td>{{ hours.days[d] }}</td>
+            <td>{% if hours.slots[d] %}{% for s in hours.slots[d] %}{{ s[0] }} → {{ s[1] }}{{ ' · ' if not loop.last }}{% endfor %}{% else %}<span class="text-secondary">fermé</span>{% endif %}</td></tr>{% endfor %}
+          </tbody></table>
+        {% else %}<div class="small text-secondary">Horaires non activés : le restaurant accepte les commandes à toute heure.</div>{% endif %}
+        {% if hours and hours.suspended %}<div class="small text-danger mt-2">Commandes suspendues{{ ' : ' ~ hours.message if hours.message }}</div>{% endif %}
+      </div></div>
+      <div class="card mf-section-card mb-3"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Commandes à emporter</h2>
+        {% if takeaway %}
+          <div class="small">
+            <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Activées</span><strong>{{ 'oui' if takeaway.enabled else 'non' }}</strong></div>
+            <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Suspendues</span><strong>{{ 'oui' if takeaway.paused else 'non' }}</strong></div>
+            <div class="d-flex justify-content-between border-bottom py-1"><span class="text-secondary">Dès que possible · programmé</span><strong>{{ 'oui' if takeaway.allow_asap else 'non' }} · {{ 'oui' if takeaway.allow_scheduled else 'non' }}</strong></div>
+            <div class="d-flex justify-content-between py-1"><span class="text-secondary">Préparation · créneau · max</span><strong>{{ takeaway.prep_minutes }} min · {{ takeaway.slot_minutes }} min · {{ takeaway.max_per_slot }}</strong></div>
+          </div>
+        {% else %}<div class="small text-secondary">Jamais configurées.</div>{% endif %}
+      </div></div>
+      <div class="card mf-section-card"><div class="card-body">
+        <h2 class="mf-section-title fs-6 mb-3">Codes QR de table</h2>
+        {% for q in qrcodes %}
+          <div class="d-flex justify-content-between small border-bottom py-1"><span>{{ q.label }}</span><span class="text-secondary">{{ q.scan_count or 0 }} scan(s)</span></div>
+        {% else %}<div class="small text-secondary">Aucun QR code de table.</div>{% endfor %}
+      </div></div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

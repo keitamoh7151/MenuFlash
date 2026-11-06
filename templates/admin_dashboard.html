@@ -41,6 +41,7 @@
         {{ categories|length }} catégorie{{ 's' if categories|length != 1 }} · {{ ns.total }} plat{{ 's' if ns.total != 1 }}
       </div>
     </div>
+    {% if mf_menu_import is defined %}<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_menu_import') }}"><i class="bi bi-file-earmark-arrow-up me-1"></i>Importer</a>{% endif %}
     <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('public_menu', slug=restaurant.slug) }}" target="_blank" rel="noopener">
       <i class="bi bi-eye me-1"></i>Aperçu client</a>
     <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#mf-add-category-modal">
@@ -222,6 +223,7 @@
         <p class="text-secondary small mb-3">Créez d'abord une catégorie (Entrées, Plats, Boissons…), puis ajoutez vos plats.</p>
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#mf-add-category-modal">
           <i class="bi bi-folder-plus me-1"></i>Créer ma première catégorie</button>
+        {% if mf_menu_import is defined %}<a class="btn btn-outline-secondary ms-2" href="{{ url_for('admin_menu_import') }}"><i class="bi bi-file-earmark-arrow-up me-1"></i>Importer depuis un fichier Excel</a>{% endif %}
       </div></div>
     {% endfor %}
   </div>
@@ -429,3 +431,5 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% endblock %}
+
+

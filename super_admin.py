@@ -365,12 +365,20 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
         now = datetime.utcnow()
         restaurants = _client_restaurants_query().all()
         metas = {m.restaurant_id: m for m in RestaurantAdminMeta.query.all()}
+        # Type de compte (sa_health.py) : un restaurant « Pilote offert » ou « Démo » ne compte
+        # pas dans le revenu récurrent ; un « Démo » ne compte pas non plus dans la conversion.
+        try:
+            from sa_health import account_types_map, risk_days
+            account_types, risk = account_types_map(), risk_days()
+        except Exception:
+            db.session.rollback()
+            account_types, risk = {}, 7
         counts = {k: 0 for k in STATUS_LABELS}
         mrr = 0
         for r in restaurants:
             st = _status(r, metas.get(r.id))
             counts[st] += 1
-            if st == "actif":
+            if st == "actif" and r.id not in account_types:
                 mrr += plan_price(r.subscription_plan)
 
         client_ids = [r.id for r in restaurants]
@@ -388,7 +396,9 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
         chart = [{"label": m.strftime("%m/%y"), "value": monthly[m]} for m in months]
 
         paying_ids = {p.restaurant_id for p in pay_q.with_entities(SubscriptionPayment.restaurant_id).distinct()}
-        conversion = round(100 * len(paying_ids) / len(restaurants)) if restaurants else 0
+        countable = [r for r in restaurants if account_types.get(r.id) != "demo"]
+        paying_ids &= {r.id for r in countable}
+        conversion = round(100 * len(paying_ids) / len(countable)) if countable else 0
 
         week_ago = now - timedelta(days=7)
         new_this_week = sum(1 for r in restaurants if r.created_at and r.created_at >= week_ago)
@@ -397,9 +407,10 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
         orders_month = Order.query.filter(Order.restaurant_id.in_(client_ids or [0]),
                                           Order.created_at >= month_start).count()
         recent_active = {rid for (rid,) in db.session.query(Order.restaurant_id)
-                         .filter(Order.created_at >= week_ago).distinct()}
+                         .filter(Order.created_at >= now - timedelta(days=risk)).distinct()}
         inactive = [r for r in restaurants
-                    if _status(r, metas.get(r.id)) in ("actif", "essai") and r.id not in recent_active]
+                    if _status(r, metas.get(r.id)) in ("actif", "essai") and r.id not in recent_active
+                    and account_types.get(r.id) != "demo"]
 
         expiring = sorted([r for r in restaurants
                            if _status(r, metas.get(r.id)) in ("actif", "essai") and r.days_remaining <= 5],
@@ -412,7 +423,7 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
 
         return render_template(
             "super_admin_dashboard.html",
-            counts=counts, total=len(restaurants), mrr=mrr, revenue_month=revenue_month,
+            counts=counts, total=len(countable), mrr=mrr, revenue_month=revenue_month, risk_days=risk,
             chart=chart, conversion=conversion, paying=len(paying_ids),
             new_this_week=new_this_week, orders_week=orders_week, orders_month=orders_month,
             inactive=inactive[:10], inactive_count=len(inactive),
@@ -1202,3 +1213,5 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
         audit("sa_errors_cleared", details=f"{n} erreur(s)")
         flash(f"{n} erreur(s) effacée(s).", "success")
         return redirect(url_for("super_admin_health"))
+
+

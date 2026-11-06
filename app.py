@@ -2093,6 +2093,14 @@ init_table_limits(app, owner_required=owner_required,
 from qr_compact import init_qr_compact
 init_qr_compact(app, owner_required=owner_required, active_restaurant=active_restaurant)
 
+# --- Outils d'exploitation du super-admin et import de menu (sa_suite.py, menu_import.py) ---
+from sa_suite import init_sa_suite
+init_sa_suite(app, super_admin_required=super_admin_required, log_audit=log_audit, limiter=limiter)
+
+from menu_import import init_menu_import
+init_menu_import(app, owner_required=owner_required, active_restaurant=active_restaurant,
+                 log_menu_change=log_menu_change, log_audit=log_audit)
+
 from hardening import init_hardening
 init_hardening(app, log_audit=log_audit)
 

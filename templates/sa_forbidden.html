@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Accès non autorisé — Super-admin{% endblock %}
+{% block content %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-5" style="max-width: 560px;">
+  <div class="card mf-section-card text-center"><div class="card-body p-4">
+    <i class="bi bi-shield-lock" style="font-size: 2.4rem; color: var(--mf-danger);"></i>
+    <h1 class="h5 fw-bold mt-3 mb-2">Accès non autorisé</h1>
+    <p class="small text-secondary mb-3">Votre rôle (<strong>{{ role_label }}</strong>) ne donne pas accès à cette page.
+      Si vous en avez besoin, demandez à un administrateur de modifier votre rôle.</p>
+    {% if landing %}<a class="btn btn-primary btn-sm" href="{{ url_for(landing) }}">Retour à mon espace</a>{% endif %}
+  </div></div>
+</div>
+{% endblock %}
