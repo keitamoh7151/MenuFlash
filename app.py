@@ -2114,6 +2114,10 @@ from menu_import import init_menu_import
 init_menu_import(app, owner_required=owner_required, active_restaurant=active_restaurant,
                  log_menu_change=log_menu_change, log_audit=log_audit)
 
+# --- Modifier la commande : le client retire, ajoute ou change un plat (order_edit.py) ---
+from order_edit import init_order_edit
+init_order_edit(app, limiter=limiter)
+
 from hardening import init_hardening
 init_hardening(app, log_audit=log_audit)
 
