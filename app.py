@@ -2118,6 +2118,11 @@ init_menu_import(app, owner_required=owner_required, active_restaurant=active_re
 from order_edit import init_order_edit
 init_order_edit(app, limiter=limiter)
 
+# --- QR codes de table sécurisés : l'adresse ne peut plus servir à changer de table (qr_security.py) ---
+from qr_security import init_qr_security
+init_qr_security(app, owner_required=owner_required, active_restaurant=active_restaurant,
+                 log_audit=log_audit)
+
 from hardening import init_hardening
 init_hardening(app, log_audit=log_audit)
 

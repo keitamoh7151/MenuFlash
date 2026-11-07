@@ -30,7 +30,7 @@
           <label for="sheet-size" class="form-label small fw-semibold mb-1">Taille</label>
           <select id="sheet-size" name="taille" class="form-select form-select-sm" style="min-width: 250px;">
             <option value="petit" selected>Petit : 40 × 50 mm (recommandé)</option>
-            <option value="mini">Mini : 32 × 42 mm (très discret)</option>
+            <option value="mini">Mini : 34 × 44 mm (très discret)</option>
             <option value="moyen">Moyen : 55 × 62 mm</option>
           </select>
         </div>
@@ -118,6 +118,9 @@
   <div class="card mf-section-card">
     <div class="card-body">
       <h2 class="mf-section-title fs-6 mb-3">Codes QR par table</h2>
+      {% if mf_qr_security is defined %}
+            <p class="small text-secondary">Chaque QR contient un <strong>code secret</strong> propre à sa table, invisible pour le client : l'adresse affichée sur son téléphone ne contient que le <strong>nom</strong> de la table, et la modifier ne permet pas de changer de table. Si un QR a été photographié ou partagé, le bouton <i class="bi bi-arrow-repeat"></i> génère un nouveau code (il faudra réimprimer l'autocollant). « Copier » donne le contenu complet du QR : ne le partagez pas aux clients.</p>
+            {% endif %}
       {% if qrcodes %}
         {% for qr in qrcodes %}
           <div class="mf-qr-card p-3 d-flex flex-wrap align-items-center justify-content-between gap-3 mb-2">
@@ -138,6 +141,13 @@
               <a class="btn btn-primary btn-sm" href="{{ url_for('table_qrcode_pdf', slug=restaurant.slug, qr_id=qr.id) }}" target="_blank" rel="noopener"><i class="bi bi-file-earmark-pdf me-1"></i>{{ 'QR petit (PDF)' if mf_qr_compact else 'Chevalet PDF' }}</a>
               {% if mf_qr_compact %}
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('table_qrcode_pdf', slug=restaurant.slug, qr_id=qr.id, taille='chevalet') }}" target="_blank" rel="noopener" title="Ancien format A6 (105 × 148 mm)">Chevalet A6</a>
+              {% endif %}
+              {% if mf_qr_security is defined %}
+              <form method="post" action="{{ url_for('admin_qrcode_regenerate', qr_id=qr.id) }}"
+                    class="mf-confirm d-inline" data-confirm-message="Générer un nouveau code pour « {{ qr.label }} » ? L'ancien autocollant ne fonctionnera plus : il faudra le réimprimer.">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-secondary btn-sm" title="Nouveau code (si ce QR a été photographié ou partagé)" aria-label="Nouveau code pour {{ qr.label }}"><i class="bi bi-arrow-repeat"></i></button>
+              </form>
               {% endif %}
               <form method="post" action="{{ url_for('admin_qrcodes_delete', qr_id=qr.id) }}"
                     class="mf-confirm d-inline" data-confirm-message="Supprimer ce QR code ?">

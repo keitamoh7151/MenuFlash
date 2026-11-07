@@ -50,7 +50,7 @@ import logging
 
 from flask import jsonify, request, url_for
 
-from models import MenuItem, Order, OrderItem, db
+from models import MenuItem, Order, OrderItem, QRCode, db
 
 log = logging.getLogger("menuflash.order_edit")
 
@@ -200,10 +200,20 @@ def init_order_edit(app, *, limiter=None):
 
     def menu_url(restaurant, order):
         """Menu à ouvrir pour « Ajouter d'autres plats » (commande à emporter : lien général ; sinon sa table)."""
-        label = None if is_takeaway(order.id) else (order.table_label or None)
         params = {"slug": restaurant.slug, "ajouter": order.id}
-        if label:
-            params["t"] = label
+        if not is_takeaway(order.id):
+            # Lien destiné au CLIENT : la table n'y figure que par son NOM (qr_security.py), jamais par un code.
+            # Le droit de commander à cette table vient de son QR scanné. Sans QR (ancienne commande) : menu général.
+            qr_id = getattr(order, "qr_code_id", None)
+            if not qr_id and order.table_label:
+                row = QRCode.query.filter_by(restaurant_id=restaurant.id, label=order.table_label).first()
+                qr_id = row.id if row else None
+            if qr_id:
+                try:
+                    from qr_security import qr_name_for
+                    params["qr"] = qr_name_for(qr_id)
+                except Exception:
+                    pass
         return url_for("public_menu", **params)
 
     # ------------------------------------------------------------------ lecture

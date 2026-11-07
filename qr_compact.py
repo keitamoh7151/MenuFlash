@@ -14,7 +14,7 @@ produisent maintenant un PETIT AUTOCOLLANT par défaut.
 
 Tailles (paramètre ?taille=...)
 -------------------------------
-  mini       32 x 42 mm, QR 24 mm   le plus discret (à scanner de près)
+  mini       34 x 44 mm, QR 26 mm   le plus discret (à scanner de près)
   petit      40 x 50 mm, QR 30 mm   PAR DÉFAUT : petit et fiable
   moyen      55 x 62 mm, QR 42 mm   pour une table large ou une lecture à distance
   chevalet   ancien format A6 (inchangé)
@@ -53,7 +53,7 @@ log = logging.getLogger("menuflash.qr_compact")
 
 # (largeur carte, hauteur carte, taille du QR) en mm
 SIZES = {
-    "mini": (32, 42, 24),
+    "mini": (34, 44, 26),
     "petit": (40, 50, 30),
     "moyen": (55, 62, 42),
 }
