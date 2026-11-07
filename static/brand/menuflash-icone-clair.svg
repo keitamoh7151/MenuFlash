@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 220" role="img" aria-label="MenuFlash">
+<rect width="220" height="220" rx="42" fill="#FFF8EE"/>
+<g transform="translate(10 27) scale(1.0)">
+    <g stroke-linecap="round" stroke-linejoin="round">
+      <!-- chef hat outline -->
+      <path d="M24 91
+        C10 88 7 73 16 63
+        C20 57 27 55 34 56
+        C33 39 46 26 63 26
+        C77 26 89 36 92 50
+        C101 42 115 44 122 54
+        C130 66 124 81 113 87"
+        fill="none" stroke="#351B12" stroke-width="8"/>
+      <path d="M68 48 C60 61 65 70 72 79
+               M80 55 C74 65 78 73 83 79"
+        fill="none" stroke="#351B12" stroke-width="6"/>
+      <!-- QR scan corners -->
+      <path d="M123 54 L123 39 Q123 30 132 30 L148 30
+               M176 30 L190 30 Q199 30 199 39 L199 54
+               M199 116 L199 130 Q199 139 190 139 L176 139
+               M148 139 L132 139 Q123 139 123 130 L123 116"
+        fill="none" stroke="#FFA500" stroke-width="8"/>
+      <!-- stylized QR pattern -->
+      <g fill="#351B12">
+        <path d="M137 44h23v23h-23z M143 50v11h11V50z
+                 M170 44h20v20h-20z M176 50v8h8v-8z
+                 M137 91h23v23h-23z M143 97v11h11V97z"/>
+        <path d="M166 73h9v9h-9z M180 72h9v9h-9z
+                 M165 87h9v9h-9z M179 91h10v10h-10z
+                 M166 105h8v8h-8z M181 108h8v8h-8z"/>
+      </g>
+      <!-- flash rays -->
+      <path d="M157 14l5-17 M181 22l13-13"
+        stroke="#FFC02E" stroke-width="8"/>
+      <!-- cloche -->
+      <path d="M42 153 C46 119 69 101 96 101
+               C123 101 145 120 149 153 Z"
+        fill="#FFA500" stroke="#FFC02E" stroke-width="3"/>
+      <path d="M87 99 C87 88 105 88 105 99"
+        fill="none" stroke="#FFC02E" stroke-width="7"/>
+      <path d="M31 162 Q28 158 34 155 L157 155 Q164 158 159 164
+               L151 170 L40 170 Q34 168 31 162Z"
+        fill="#FFA500"/>
+      <path d="M62 133 C68 119 78 111 91 107"
+        fill="none" stroke="#FFF8EE" stroke-width="7"/>
+    </g></g>
+</svg>
