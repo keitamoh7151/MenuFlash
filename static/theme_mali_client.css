@@ -1,0 +1,192 @@
+/* ==========================================================================
+   MenuFlash — thème « Bogolan » des pages CLIENT (/m/…) : menu sur place (QR de table), menu à emporter
+   (lien général), suivi de commande, menu indisponible / abonnement expiré.
+   Chargé APRÈS theme_mali.css. S'applique uniquement avec la classe « mf-client » sur <body> (voir base.html).
+
+   Ce qui reste celui du restaurant : son logo, son nom, et sa couleur d'accent (choisie dans « Apparence »).
+   Ce qui vient de MenuFlash : la structure (en-tête brun avec motif bogolan, liseré orange, cartes arrondies,
+   boutons en pilule, polices, pied de page avec le logo MenuFlash).
+   ========================================================================== */
+
+body.mf-client {
+  /* La couleur d'accent reste celle du restaurant : on reprend la valeur posée sur <html> par base.html. */
+  --mf-accent: inherit;
+  --mf-accent-dark: inherit;
+  --mf-accent-light: inherit;
+  --bs-primary: var(--mf-accent);
+  --bs-link-color: var(--mf-accent-dark);
+  --bs-link-hover-color: var(--mali-umber);
+  /* Couleur du texte posé SUR l'accent : blanc par défaut, brun foncé si l'accent est clair (ambre, ocre). */
+  --mf-on-accent: #fff;
+}
+@supports (color: oklch(from red l c h)) {
+  body.mf-client { --mf-on-accent: oklch(from var(--mf-accent) clamp(0.16, (0.7 - l) * 1000, 1) 0.02 60); }
+}
+body.mf-client a { color: var(--mf-accent-dark); }
+body.mf-client a:hover { color: var(--mali-umber); }
+
+/* ---------- Boutons : pilules, couleur du restaurant ---------- */
+body.mf-client .btn-primary {
+  --bs-btn-color: var(--mf-on-accent); --bs-btn-hover-color: #fff; --bs-btn-active-color: #fff; --bs-btn-disabled-color: var(--mf-on-accent);
+  --bs-btn-bg: var(--mf-accent); --bs-btn-border-color: var(--mf-accent);
+  --bs-btn-hover-bg: var(--mf-accent-dark); --bs-btn-hover-border-color: var(--mf-accent-dark);
+  --bs-btn-active-bg: var(--mf-accent-dark); --bs-btn-active-border-color: var(--mf-accent-dark);
+  --bs-btn-disabled-bg: var(--mf-accent); --bs-btn-disabled-border-color: var(--mf-accent);
+}
+body.mf-client .form-control:focus, body.mf-client .form-select:focus {
+  border-color: var(--mf-accent); box-shadow: 0 0 0 .25rem color-mix(in srgb, var(--mf-accent) 25%, transparent);
+}
+body.mf-client .form-check-input:checked { background-color: var(--mf-accent); border-color: var(--mf-accent); }
+body.mf-client .progress { --bs-progress-bar-bg: var(--mf-accent); }
+
+/* ---------- En-tête : brun, motif bogolan, liseré orange ---------- */
+body.mf-client .mf-hero {
+  background-color: var(--mali-umber);
+  background-image: linear-gradient(rgba(43,30,21,.88), rgba(43,30,21,.88)), var(--mali-bogolan);
+  background-size: auto, 96px 96px;
+  color: var(--mali-cream);
+  border-radius: 0;
+  padding: 70px 16px 58px;
+}
+body.mf-client .mf-hero::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; pointer-events: none;
+  background: linear-gradient(90deg, rgba(255,165,0,0) 0%, #FFA500 20%, #FFBA33 50%, #FFA500 80%, rgba(255,165,0,0) 100%);
+}
+body.mf-client .mf-hero h1 {
+  font-family: var(--mali-display); font-weight: 800; letter-spacing: -.035em; line-height: 1.04;
+  font-size: clamp(2.05rem, 8vw, 3rem); color: var(--mali-cream);
+}
+body.mf-client .mf-hero .mf-subtitle { color: rgba(243,231,207,.82); opacity: 1; font-size: 1.02rem; }
+body.mf-client .mf-hero .mf-logo {
+  width: 94px; height: 94px; border: 3px solid var(--mf-accent); background: #fff; margin-bottom: 14px;
+  box-shadow: 0 0 0 6px rgba(243,231,207,.14), 0 12px 26px rgba(0,0,0,.38);
+}
+body.mf-client .mf-table-badge {
+  background: rgba(255,165,0,.16); border: 1px solid var(--mf-accent); color: #FFD58A !important; font-weight: 700;
+}
+body.mf-client .mf-lang-toggle { background: var(--mali-cream); box-shadow: 0 6px 18px rgba(10,5,2,.4); }
+body.mf-client .mf-lang-btn { color: var(--mali-soft); }
+body.mf-client .mf-lang-btn:hover { background: rgba(43,30,21,.07); }
+body.mf-client .mf-lang-btn.active { background: var(--mf-accent); color: var(--mf-on-accent); box-shadow: none; }
+
+/* « Mes commandes » */
+body.mf-client .mf-myorders-fab.btn-dark {
+  --bs-btn-bg: var(--mali-brown); --bs-btn-border-color: rgba(255,165,0,.55); --bs-btn-color: var(--mali-cream);
+  --bs-btn-hover-bg: var(--mali-umber-2); --bs-btn-hover-border-color: var(--mali-flash); --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: var(--mali-umber-2); --bs-btn-active-border-color: var(--mali-flash); --bs-btn-active-color: #fff;
+  box-shadow: 0 10px 24px rgba(10,5,2,.4);
+}
+body.mf-client .mf-addmode-banner { background: var(--mf-accent); color: var(--mf-on-accent); }
+
+/* ---------- Catégories (pastilles) ---------- */
+body.mf-client .mf-nav-pills {
+  /* barre pleine largeur, pastilles alignées sur la colonne du menu (680 px) */
+  max-width: none; padding-left: max(12px, calc((100% - 680px) / 2 + 12px)); padding-right: max(12px, calc((100% - 680px) / 2 + 12px));
+  background: var(--mali-paper); margin-top: 0; border-radius: 0; padding-top: 12px; padding-bottom: 12px;
+  box-shadow: 0 10px 22px rgba(43,30,21,.09); border-bottom: 1px solid var(--mali-line);
+}
+body.mf-client .mf-nav-pills .nav-link {
+  border-radius: 999px; background: #fff; border: 1px solid #DCCBAA; color: var(--mali-soft); font-weight: 700;
+}
+body.mf-client .mf-nav-pills .nav-link.active,
+body.mf-client .mf-nav-pills .nav-link:hover { background: var(--mf-accent); border-color: var(--mf-accent); color: var(--mf-on-accent); }
+body.mf-client .mf-category-title { font-family: var(--mali-display); font-weight: 800; letter-spacing: -.02em; color: var(--mali-umber); }
+body.mf-client .mf-category-title::before {
+  width: 10px; height: 10px; border-radius: 2px; background: var(--mf-accent); transform: rotate(45deg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mf-accent) 24%, transparent); margin-right: 6px;
+}
+
+/* ---------- Bandeau « à emporter », recherche ---------- */
+body.mf-client .mf-tk-banner { border-radius: 18px; border: 1px solid color-mix(in srgb, var(--mf-accent) 40%, transparent); }
+body.mf-client .mf-tk-banner.is-browse { background: #fff; border-color: var(--mali-line); }
+body.mf-client .mf-pub-search .form-control { border-color: #DCCBAA; box-shadow: 0 2px 12px rgba(43,30,21,.06); }
+body.mf-client .mf-pub-search .form-control:focus { border-color: var(--mf-accent); }
+body.mf-client .mf-pub-search-clear { background: #F1E7D2; color: var(--mali-soft); }
+
+/* ---------- Plats ---------- */
+body.mf-client .mf-item-card, body.mf-client .mf-resto-info .card {
+  border: 1px solid var(--mali-line); border-radius: 18px; box-shadow: 0 2px 14px rgba(43,30,21,.06); background: #fff;
+}
+body.mf-client .mf-item-card.hover-lift:hover { box-shadow: 0 14px 28px rgba(43,30,21,.12); }
+body.mf-client .mf-item-card h3 { font-family: var(--mali-display); font-weight: 700; letter-spacing: -.01em; color: var(--mali-umber); }
+body.mf-client .mf-item-img, body.mf-client .mf-item-noimg { border-radius: 14px; }
+body.mf-client .mf-item-price { color: var(--mf-accent-dark); font-weight: 800; }
+body.mf-client .mf-prep-chip { background: #F6EEDD; color: var(--mali-soft); border-radius: 999px; }
+body.mf-client .mf-rating-chip { border-radius: 999px; }
+body.mf-client .mf-qty-group .btn-outline-secondary { --bs-btn-border-color: #D9C9AA; }
+body.mf-client .mf-qty-group .mf-qty-plus {
+  --bs-btn-color: var(--mf-on-accent); --bs-btn-bg: var(--mf-accent); --bs-btn-border-color: var(--mf-accent);
+  --bs-btn-hover-color: #fff; --bs-btn-hover-bg: var(--mf-accent-dark); --bs-btn-hover-border-color: var(--mf-accent-dark);
+  --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--mf-accent-dark); --bs-btn-active-border-color: var(--mf-accent-dark);
+}
+body.mf-client .mf-pop-tile { border: 1px solid var(--mali-line); border-radius: 18px; box-shadow: 0 2px 14px rgba(43,30,21,.07); }
+body.mf-client .mf-pop-add, body.mf-client .mf-pop-qty { color: var(--mf-on-accent); }
+body.mf-client .mf-pop-price { font-weight: 800; }
+body.mf-client .mf-pub-more { border-color: #D9C9AA; border-radius: 999px; }
+body.mf-client .mf-pub-more:hover { border-color: var(--mf-accent); }
+
+/* ---------- Barre du panier ---------- */
+body.mf-client .mf-cart-bar { background: var(--mali-brown); color: var(--mali-cream); box-shadow: 0 -12px 30px rgba(20,10,5,.38); }
+body.mf-client .mf-cart-bar::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+  background: linear-gradient(90deg, rgba(255,165,0,0) 0%, #FFA500 20%, #FFBA33 50%, #FFA500 80%, rgba(255,165,0,0) 100%);
+}
+body.mf-client .mf-cart-bar.mf-cart-addmode { background: var(--mf-accent-dark); }
+body.mf-client .mf-cart-bar .btn-primary { padding-left: 1.4rem !important; padding-right: 1.4rem !important; box-shadow: 0 6px 16px rgba(0,0,0,.28); }
+
+/* ---------- Fenêtres (récapitulatif, à emporter, annulation) et « Mes commandes » ---------- */
+body.mf-client .modal-content { background: var(--mali-paper); }
+body.mf-client .modal-title { font-family: var(--mali-display); font-weight: 800; letter-spacing: -.02em; }
+body.mf-client .modal-footer .btn-outline-secondary, body.mf-client .modal-footer .btn-primary { padding-left: 1.3rem; padding-right: 1.3rem; }
+body.mf-client .list-group-item { background: transparent; border-color: var(--mali-line); }
+body.mf-client .mf-tk-modal .modal-content { border-radius: 24px; }
+body.mf-client .mf-tk-option { border-radius: 16px; border-color: #DCCBAA; }
+body.mf-client .btn-check:checked + .mf-tk-option { border-color: var(--mf-accent); background: var(--mf-accent-light); }
+body.mf-client .mf-tk-grip { background: #D9C9AA; }
+body.mf-client .mf-upsell-item { background: #F6EEDD; border-radius: 14px; }
+body.mf-client .mf-upsell-add-btn { background: var(--mf-accent); color: var(--mf-on-accent); }
+body.mf-client .mf-upsell-add-btn:hover { background: var(--mf-accent-dark); color: #fff; }
+body.mf-client .offcanvas { background: var(--mali-paper); border-left: 0; }
+body.mf-client .offcanvas-header {
+  background: var(--mali-brown); color: var(--mali-cream); border-bottom: 3px solid var(--mali-flash); padding: 1rem 1.25rem;
+}
+body.mf-client .offcanvas-header .offcanvas-title { color: var(--mali-cream); }
+body.mf-client .offcanvas-header .btn-close { filter: invert(1) grayscale(1) brightness(1.8); opacity: .85; }
+body.mf-client .mf-myorder-card { border: 1px solid var(--mali-line); border-radius: 18px; box-shadow: 0 2px 12px rgba(43,30,21,.07); background: #fff; }
+
+/* ---------- Suivi de commande ---------- */
+body.mf-client .mf-order-card { border: 1px solid var(--mali-line); border-radius: 22px; box-shadow: 0 8px 28px rgba(43,30,21,.1); background: #fff; }
+body.mf-client .mf-status-badge { border-radius: 999px; }
+body.mf-client .mf-progress { height: 12px; background: #EADFC6; }
+body.mf-client .mf-progress .progress-bar { background: var(--mf-accent); border-radius: 999px; }
+body.mf-client .mf-step-labels span.active { color: var(--mf-accent-dark); }
+body.mf-client .mf-ref-box { background: #F6EEDD; border-radius: 16px; }
+body.mf-client .mf-ref-badge { background: var(--mf-accent-light); color: var(--mf-accent-dark); }
+body.mf-client .mf-ref-code strong { border-color: var(--mf-accent); border-radius: 10px; }
+body.mf-client .mf-star-picker .mf-star-filled { color: var(--mf-accent); }
+
+/* ---------- Pied de page : brun, frise bogolan, logo MenuFlash ---------- */
+body.mf-client > footer.text-center {
+  position: relative; margin-top: 2.5rem; padding: 36px 16px 10px !important;
+  background: var(--mali-brown); color: var(--mali-cream) !important;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 12px; font-size: .88rem;
+}
+body.mf-client > footer.text-center::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 12px;
+  background: #2B1E15 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='12' viewBox='0 0 20 12'%3E%3Cpath d='M0 9 L5 3 L10 9 L15 3 L20 9' fill='none' stroke='%23D98E1F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") repeat-x center / 20px 12px;
+}
+body.mf-client > footer.text-center .mf-client-footer-logo { display: block; height: 44px; width: auto; max-width: 100%; }
+body.mf-client .mf-legal-footer {
+  background: var(--mali-brown); margin: 0; padding: 0 16px 26px !important; color: rgba(243,231,207,.7);
+}
+body.mf-client .mf-legal-footer a, body.mf-client .mf-legal-footer .text-secondary { color: rgba(243,231,207,.78) !important; }
+body.mf-client .mf-legal-footer a:hover { color: #fff !important; }
+
+/* ---------- Pages « menu indisponible » / « abonnement expiré » ---------- */
+body.mf-client .mf-auth-card .mf-brand-plate-sm { display: none; }
+body.mf-client .mf-auth-card img[alt] { box-shadow: 0 0 0 3px var(--mali-cream), 0 0 0 5px var(--mali-line); }
+
+@media (max-width: 575.98px) {
+  body.mf-client .mf-hero { padding-top: 66px; }
+  body.mf-client .mf-hero .mf-logo { width: 86px; height: 86px; }
+}
