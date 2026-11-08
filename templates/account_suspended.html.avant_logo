@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Compte suspendu — MenuFlash Mini{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card text-center p-4" style="max-width: 460px;">
+    <div class="card-body">
+      <i class="bi bi-pause-circle" style="font-size: 2.6rem; color: var(--mf-danger);"></i>
+      <h1 class="h5 fw-bold mt-3 mb-2">Le compte de « {{ restaurant.name }} » est suspendu</h1>
+      {% if reason %}<p class="mb-2"><strong>Motif :</strong> {{ reason }}</p>{% endif %}
+      <p class="small text-secondary mb-3">Votre menu n'est plus visible par vos clients. Contactez l'équipe MenuFlash Mini pour régulariser la situation.</p>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_logout') }}">Se déconnecter</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,59 @@
+QR de table sécurisés (MenuFlash) : l'adresse ne contient que le NOM de la table, et on ne peut pas la modifier pour changer de table
+
+CE QUE VOIT LE CLIENT
+- Dans la barre d'adresse de son téléphone : /m/chez-awa?qr=terrasse    (le nom donné par le restaurant, rien d'autre)
+- Il peut modifier ce texte comme il veut (qr=table-2, qr=2, un nom inventé...) : rien ne change, il reste sur SA table
+  et un message l'explique. Seul le scan du vrai QR d'une autre table permet de changer de table.
+- Une adresse copiée et envoyée à quelqu'un d'autre ouvre le menu général (sans table) : le nom seul ne donne accès à rien.
+
+COMMENT C'EST POSSIBLE
+Le QR imprimé contient, en plus du nom, un code secret propre à la table (invisible : il est DANS L'IMAGE du QR).
+À l'ouverture, le serveur vérifie ce code, mémorise la table (cookie signé, 6 h), puis redirige aussitôt vers l'adresse
+« nom seul » : le code n'apparaît ni dans la barre d'adresse, ni dans l'historique du navigateur.
+Sans ce code, rien ne distinguerait un client assis à la table 1 de quelqu'un qui tape « table-2 » : c'est pourquoi il existe,
+mais seul le QR le contient.
+- Une commande ou un appel de serveur dont la table ne correspond pas à celle scannée est REFUSÉ, même si le formulaire est modifié.
+- Page Codes QR : bouton ↻ « Nouveau code » par table (si un QR a été photographié ou partagé) : l'ancien QR cesse de fonctionner,
+  il faut réimprimer l'autocollant. Le bouton « Copier » donne le contenu complet du QR : ne le partagez pas aux clients.
+- 15 tentatives invalides par 10 minutes et par adresse IP, puis blocage de 10 minutes (les scans valides ne sont jamais bloqués).
+
+À SAVOIR AVANT D'INSTALLER
+- Les QR déjà imprimés avec l'ancien lien (?qr=1) cessent de fonctionner : ils renvoient au menu général avec un message.
+  Réimprimez-les depuis la page Codes QR (« QR petit », « Planche »). Si vous n'avez imprimé que des QR de test : rien à craindre.
+- Le contenu du QR est plus long (nom + code) : l'autocollant « Mini » passe de 32 x 42 à 34 x 44 mm pour rester lisible.
+- Un client dont la mémorisation a expiré (plus de 6 h) ou qui change de navigateur doit scanner à nouveau son QR.
+  Les cookies doivent être autorisés.
+- Aucune variable à ajouter dans Render. Une table « qr_access » est créée au démarrage ; chaque QR existant reçoit son code.
+
+INSTALLATION (première fois OU mise à jour de la version précédente de ce correctif)
+1. Décompressez ce zip dans le dossier du projet (là où se trouve app.py), en remplaçant qr_security.py s'il existe.
+2. Dans PowerShell, dans ce dossier :   python ajouter_securite_qr.py
+   Il fait 5 retouches précises (app.py, admin_qrcodes.html, order_status.html, order_edit.py, qr_compact.py), met à jour
+   la version précédente si elle était installée, et crée une copie de sécurité <fichier>.avant_qr_securite. Relançable sans danger.
+3. git add qr_security.py ajouter_securite_qr.py app.py order_edit.py qr_compact.py templates/admin_qrcodes.html templates/order_status.html
+   git status      <- qr_security.py doit apparaître comme NOUVEAU (ou modifié si déjà poussé), sinon Render plante au démarrage
+   git commit -m "QR de table sécurisés : adresse avec le seul nom, table vérifiée par le serveur"
+   git push
+4. Après le déploiement : page Codes QR > « Copier » ; ouvrez ce lien dans le navigateur : la barre d'adresse doit afficher
+   /m/<restaurant>?qr=<nom de la table> seulement.
+
+TEST EN LOCAL (python app.py), 10 minutes
+1. Codes QR : créez « Table 1 » et « Terrasse ». Cliquez « Copier » pour chacune (contenu complet du QR).
+2. Ouvrez le lien copié de la Table 1 : la barre d'adresse devient  ?qr=table-1  (aucun code). Passez une commande : elle arrive
+   en cuisine pour « Table 1 ».
+3. Dans la barre d'adresse, remplacez par  qr=2  puis  qr=terrasse  puis  qr=table-2 : à chaque fois vous revenez sur ?qr=table-1,
+   avec un message.
+4. Ouvrez  /m/<restaurant>?qr=table-1  dans une fenêtre privée (aucun QR scanné) : menu général, sans table.
+5. F12 > Éléments : changez la valeur du champ caché « qr_id », puis commandez : « Cette demande ne correspond pas à votre table ».
+6. Ouvrez le lien copié de la Terrasse : vous changez de table (?qr=terrasse). Remplacez par qr=1 : vous revenez à la Terrasse.
+7. Cliquez sur ↻ pour la Table 1 : l'ancien lien copié est refusé, le nouveau fonctionne.
+
+LIMITES (aucune méthode ne les supprime)
+- Quelqu'un ASSIS à une table peut scanner le QR de la table voisine, ou le photographier (le code est dans l'image). En cas d'abus,
+  le bouton ↻ change le code.
+- Un nom de table très long est tronqué à 40 caractères dans l'adresse ; deux tables au nom quasi identique (« Table 1 » et
+  « table-1 ») ont la même adresse affichée, ce qui est sans conséquence : le droit d'accès vient du QR scanné, pas du nom.
+
+POUR ANNULER
+Copiez les fichiers .avant_qr_securite par-dessus les originaux (app.py, order_edit.py, qr_compact.py, templates/...), supprimez
+qr_security.py, puis git push. La table qr_access peut rester en base sans effet.

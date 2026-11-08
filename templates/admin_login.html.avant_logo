@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Connexion — MenuFlash Mini{% endblock %}
+{% block content %}
+{% set fv = session.pop('mf_prefill', {}) %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card p-2">
+    <div class="card-body p-4">
+      <div class="text-center mb-4">
+        <a href="{{ url_for('landing') }}" class="text-decoration-none">
+          <i class="bi bi-qr-code-scan" style="font-size: 1.8rem; color: var(--mf-accent);"></i>
+          <h1 class="h5 fw-bold mt-2 mb-0" style="color: var(--mf-ink);">
+            MenuFlash<span class="mf-brand-mini">Mini</span>
+          </h1>
+        </a>
+      </div>
+      <form method="post" data-mf-guard autocomplete="on">
+        {% include "_form_guard.html" %}
+        <div class="mb-3">
+          <label for="email" class="form-label small fw-semibold">Adresse email</label>
+          <input type="email" class="form-control" id="email" name="email" maxlength="120"
+                 autocomplete="username" autocapitalize="off" spellcheck="false" inputmode="email"
+                 placeholder="vous@restaurant.com" value="{{ fv.email or '' }}" required autofocus>
+        </div>
+        <div class="mb-2">
+          <label for="password" class="form-label small fw-semibold">Mot de passe</label>
+          <input type="password" class="form-control" id="password" name="password" maxlength="128"
+                 data-mf-password="current" autocomplete="current-password" required>
+        </div>
+        <div class="text-end mb-3">
+          <a href="{{ url_for('forgot_password') }}" class="small">Mot de passe oublié ?</a>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 py-2">Se connecter</button>
+      </form>
+      <p class="text-center text-secondary small mt-3 mb-0">
+        Pas encore de compte ? <a href="{{ url_for('signup') }}">Démarrer l'essai gratuit</a>
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

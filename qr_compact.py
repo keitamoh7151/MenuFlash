@@ -211,7 +211,7 @@ def _footer(c, taille_txt):
     c.drawString(x0 + 53 * mm, y0 - 0.8 * mm,
                  "Cette ligne doit mesurer 5 cm. Sinon, imprimez à 100 % (taille réelle), "
                  "sans « Ajuster à la page ».")
-    c.drawString(x0, y0 + 3.2 * mm, f"MenuFlash Mini · autocollants {taille_txt} · à découper sur les traits.")
+    c.drawString(x0, y0 + 3.2 * mm, f"MenuFlash · autocollants {taille_txt} · à découper sur les traits.")
 
 
 def make_sheet_pdf(items, size_key=DEFAULT_SIZE, restaurant_name="", accent_hex="#D98E1F"):
@@ -235,7 +235,7 @@ def make_sheet_pdf(items, size_key=DEFAULT_SIZE, restaurant_name="", accent_hex=
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     c.setTitle(f"QR codes — {_latin(restaurant_name, 60)}")
-    c.setAuthor("MenuFlash Mini")
+    c.setAuthor("MenuFlash")
 
     for i, item in enumerate(items):
         if i and i % per_page == 0:

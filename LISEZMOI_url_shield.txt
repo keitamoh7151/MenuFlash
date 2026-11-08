@@ -1,0 +1,58 @@
+Bouclier d'adresses (MenuFlash) : seul le super-admin peut modifier les adresses
+
+CE QUI CHANGE
+- /admin/commandes devient /admin/commande (ou n'importe quoi d'autre) : le restaurateur ou l'employé reste sur la dernière page
+  d'administration valide qu'il avait ouverte. Plus de « Not Found », aucun message.
+- Même comportement pour : adresse inconnue (404), adresse réservée à un autre rôle (403, ex. /super-admin tapé par un
+  restaurateur), mauvaise méthode (405, ex. /admin/items/5/delete tapé dans la barre), numéro d'un autre restaurant
+  (/admin/items/999/edit), adresse falsifiée (« .. », « // », « < », « > », caractères de contrôle, adresse démesurée).
+- Visiteur non connecté sur /admin… ou /super-admin… : page de connexion, que l'adresse existe ou non (on ne peut plus
+  deviner quelles pages d'administration existent).
+- Client sur /m/<restaurant>/… : sa page de commande ou le menu (via order_access.py), sinon l'accueil.
+- Employé qui tape une adresse de gestionnaire : le message « Cette page est réservée au gestionnaire… » est retiré.
+- SUPER-ADMIN : aucun changement, il garde les vraies erreurs.
+- Paramètres falsifiés sur une page valide (ex. ?x=<script>) : la page s'ouvre, paramètres retirés.
+
+CE QUI N'EST PAS TOUCHÉ
+- Appels du navigateur (JSON, temps réel, boutons) : ils reçoivent l'erreur d'origine, rien ne casse.
+- /static, images, favicon, robots : 404 normal.
+- Page autorisée tapée à la main (un restaurateur qui tape /admin/statistiques) : il y arrive, comme s'il avait cliqué.
+  C'est normal : la protection réelle, c'est le contrôle des droits sur chaque route.
+
+AUDIT DES DROITS (fait sur votre projet_complet.txt, 124 adresses)
+- Toutes les adresses /admin/*, /super-admin/*, /compte/* exigent une connexion (login_required, owner_required,
+  super_admin_required ou un contrôle current_user dans la fonction).
+- Les seules adresses sans connexion sont publiques par nature : accueil, inscription, mot de passe oublié/réinitialisation,
+  /m/<restaurant>/…, /media/<id>, QR, vérification email/téléphone, config « à emporter », et la tâche de sauvegarde
+  automatique (protégée par son chemin secret CRON_PATH).
+- Les ids (articles, catégories, commandes, QR) sont toujours filtrés par restaurant_id : un numéro d'un autre restaurant
+  donne une erreur, désormais remplacée par la redirection silencieuse.
+- Aucune faille d'autorisation trouvée. Aucune redirection « next » vers une adresse externe (pas de redirection ouverte).
+
+SÉCURITÉ DU MODULE
+- La destination n'est JAMAIS lue dans l'adresse : elle vient d'un cookie signé « mf_nav » (12 h) vérifié à chaque usage
+  (adresse interne, vraie page GET, jamais /super-admin pour un autre rôle, jamais login/logout/jeton).
+- Anti-boucle : cookie signé « mf_bounce » (15 s). Si la page de destination échoue aussi, retour à l'accueil « / ».
+- Journal de sécurité : action « url_tampering », 3 lignes au plus par IP et par 10 minutes, seulement les 3 premiers segments
+  de l'adresse (ni paramètres ni jeton).
+- Aucune table, aucune dépendance. Idempotent.
+
+INSTALLATION
+1. Décompressez ce zip dans le dossier du projet (là où se trouve app.py).
+2. Dans PowerShell, dans ce dossier :   python ajouter_url_shield.py
+   (3 lignes ajoutées dans app.py avant « from hardening import init_hardening » ; copie app.py.avant_url_shield ;
+   relançable sans danger)
+3. git add url_shield.py ajouter_url_shield.py test_url_shield.py app.py
+   git status      <- url_shield.py doit apparaître comme NOUVEAU fichier (sinon Render plante au démarrage)
+   git commit -m "Bouclier d'adresses : une adresse modifiée ramène sur une page valide"
+   git push
+
+TEST EN LOCAL (python app.py), 3 minutes
+1. Connecté comme restaurateur, ouvrez /admin/commandes, puis changez-le en /admin/commande : vous revenez sur /admin/commandes.
+2. Tapez /super-admin, /admin/zzz, /admin/items/1/delete : même résultat, aucun message.
+3. Déconnecté, tapez /admin/zzz et /super-admin/zzz : page de connexion dans les deux cas.
+4. Connecté comme super-admin : /admin/commande affiche bien « Not Found » (c'est voulu).
+5. Tests automatiques :  python test_url_shield.py   (18 tests, doit afficher OK)
+
+POUR ANNULER
+Copiez app.py.avant_url_shield par-dessus app.py, supprimez url_shield.py, puis git push.

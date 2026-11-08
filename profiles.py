@@ -1,5 +1,5 @@
 """
-MenuFlash Mini — Profils : gestionnaire, restaurant et membres de l'équipe.
+MenuFlash — Profils : gestionnaire, restaurant et membres de l'équipe.
 
 Branchement dans app.py, TOUT EN BAS, juste après init_security_plus(...) :
 

@@ -49,7 +49,7 @@ def make_table_tent_pdf(restaurant_name, qr_target_url, table_label=None, accent
 
     c.setFont("Helvetica", 7)
     c.setFillColor(INK_SOFT)
-    c.drawCentredString(page_w / 2, 6 * mm, "Propulsé par MenuFlash Mini")
+    c.drawCentredString(page_w / 2, 6 * mm, "Propulsé par MenuFlash")
 
     c.showPage()
     c.save()

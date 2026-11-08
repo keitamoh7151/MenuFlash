@@ -372,14 +372,14 @@ def init_security_plus(app, *, limiter, log_audit, owner_required, active_restau
         ua = describe_user_agent(request.headers.get("User-Agent"))
         send_mail(
             user.email,
-            "Nouvelle connexion à votre compte MenuFlash Mini",
+            "Nouvelle connexion à votre compte MenuFlash",
             f"Bonjour,\n\nVotre compte ({user.email}) vient de se connecter depuis un nouvel "
             f"appareil :\n\n  • Appareil : {ua}\n  • Adresse IP : {client_ip()}\n"
             f"  • Date : {_local_label(datetime.utcnow())}\n\n"
             f"Si c'était vous, vous n'avez rien à faire.\n\n"
             f"Si ce n'était PAS vous, cliquez ici immédiatement : votre compte sera bloqué, "
             f"toutes les sessions seront fermées et vous recevrez un lien pour choisir un "
-            f"nouveau mot de passe :\n{link}\n\nL'équipe MenuFlash Mini")
+            f"nouveau mot de passe :\n{link}\n\nL'équipe MenuFlash")
         audit("security_new_device_alert", user=user, details=ua)
 
     def _on_login(sender, user, **extra):
@@ -545,10 +545,10 @@ def init_security_plus(app, *, limiter, log_audit, owner_required, active_restau
             reset = app.view_functions.get("reset_password")
             tok = serializer.dumps({"uid": user.id, "stamp": user.security_stamp}, salt="pwd-reset")
             link = url_for("reset_password", token=tok, _external=True) if reset else ""
-            send_mail(user.email, "Votre compte MenuFlash Mini a été sécurisé",
+            send_mail(user.email, "Votre compte MenuFlash a été sécurisé",
                       "Bonjour,\n\nSuite à votre signalement, votre compte a été bloqué et toutes "
                       "les sessions ont été fermées.\n\nChoisissez dès maintenant un nouveau mot de "
-                      f"passe (lien valable 1 heure) :\n{link}\n\nL'équipe MenuFlash Mini")
+                      f"passe (lien valable 1 heure) :\n{link}\n\nL'équipe MenuFlash")
         except Exception:
             logger.exception("Envoi du lien de réinitialisation impossible")
         if current_user.is_authenticated and current_user.id == user.id:
@@ -582,10 +582,10 @@ def init_security_plus(app, *, limiter, log_audit, owner_required, active_restau
         link = invite_link(user)
         send_mail(user.email, f"Invitation à rejoindre l'équipe de {restaurant_name}",
                   f"Bonjour{(' ' + name) if name else ''},\n\n{restaurant_name} vous invite à "
-                  f"rejoindre son équipe sur MenuFlash Mini pour recevoir et gérer les commandes.\n\n"
+                  f"rejoindre son équipe sur MenuFlash pour recevoir et gérer les commandes.\n\n"
                   f"Choisissez votre mot de passe ici (lien valable 72 heures, à usage unique) :\n"
                   f"{link}\n\nSi vous n'attendiez pas cette invitation, ignorez ce message.\n\n"
-                  f"L'équipe MenuFlash Mini")
+                  f"L'équipe MenuFlash")
         session["mf_last_invite"] = {"email": user.email, "link": link}
         return link
 

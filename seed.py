@@ -96,6 +96,6 @@ with app.app_context():
         print("  Cuisinier (accès limité) : cuisine@example.com / cuisine1234")
         print("  Suggestions de vente additionnelle pré-configurées (Riz au gras → Bissap/Gingembre).")
         print("  Astuce : ajoutez un logo depuis Boutique > Apparence & logo pour remplacer")
-        print("  la marque MenuFlash Mini par celle de votre restaurant.")
+        print("  la marque MenuFlash par celle de votre restaurant.")
     else:
         print("Le restaurant de démo existe déjà.")

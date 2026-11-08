@@ -1,5 +1,5 @@
 """
-MenuFlash Mini — Bouclier d'adresses : seul le super-admin peut « jouer » avec les adresses (URL).
+MenuFlash — Bouclier d'adresses : seul le super-admin peut « jouer » avec les adresses (URL).
 
 Branchement dans app.py, JUSTE APRÈS « init_order_access(app, log_audit=log_audit) » et AVANT
 « from hardening import init_hardening » (le script ajouter_url_shield.py le fait pour vous) :

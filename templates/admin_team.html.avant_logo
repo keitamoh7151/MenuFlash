@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% from "_phone_field.html" import phone_field %}
+{% block title %}Équipe — {{ restaurant.name }}{% endblock %}
+{% block content %}
+{% include "_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 920px;">
+
+  <div class="alert alert-light border d-flex gap-2 mb-4">
+    <i class="bi bi-info-circle-fill flex-shrink-0 mt-1" style="color: var(--mf-accent);"></i>
+    <div class="small">
+      <strong>Les comptes d'équipe (cuisine, serveurs) ont accès uniquement aux commandes et aux appels de table.</strong>
+      Ils ne voient ni le menu, ni les statistiques, ni les paramètres. Créez un compte par personne :
+      vous saurez qui a fait quoi, et vous pourrez désactiver un compte sans gêner les autres.
+    </div>
+  </div>
+
+  {% if last_invite %}
+    <div class="card mf-section-card mb-4 border-success-subtle"><div class="card-body">
+      <h2 class="mf-section-title fs-6 mb-2"><i class="bi bi-envelope-check me-1 text-success"></i>Invitation envoyée à {{ last_invite.email }}</h2>
+      <p class="small text-secondary mb-2">Si l'email n'arrive pas, envoyez ce lien à l'employé (WhatsApp, SMS). Il est valable 72 heures et ne fonctionne qu'une fois. <strong>Ce lien n'est affiché qu'une seule fois.</strong></p>
+      <div class="input-group input-group-sm">
+        <input type="text" class="form-control" value="{{ last_invite.link }}" readonly id="mf-invite-link" aria-label="Lien d'invitation">
+        <button class="btn btn-outline-secondary mf-copy-btn" type="button" data-copy-text="{{ last_invite.link }}"><i class="bi bi-clipboard me-1"></i>Copier</button>
+      </div>
+      {% if last_invite.phone and last_invite.phone|wa_number %}
+        {% set wa_text = 'Bonjour ' ~ (last_invite.name or '') ~ ', voici votre invitation à rejoindre l\'équipe de ' ~ (last_invite.restaurant or 'notre restaurant') ~ ' sur MenuFlash Mini : ' ~ last_invite.link %}
+        <a class="btn btn-success btn-sm mt-2" target="_blank" rel="noopener"
+           href="https://wa.me/{{ last_invite.phone|wa_number }}?text={{ wa_text|urlencode }}">
+          <i class="bi bi-whatsapp me-1"></i>Envoyer par WhatsApp à {{ last_invite.phone }}</a>
+      {% endif %}
+    </div></div>
+  {% endif %}
+
+  <div class="card mf-section-card mb-4"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-1">Inviter un membre de l'équipe</h2>
+    <p class="small text-secondary">L'employé reçoit un email pour choisir <strong>lui-même</strong> son mot de passe. Vous ne le connaissez jamais.</p>
+    <form method="post" action="{{ url_for('admin_team_add') }}" class="row g-2 align-items-start" data-mf-guard data-mf-sudo autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="col-6 col-md-4">
+        <label for="staff-first" class="form-label small">Prénom</label>
+        <input type="text" id="staff-first" name="first_name" class="form-control" minlength="2" maxlength="50" autocomplete="off" placeholder="Ex : Fatou" required>
+      </div>
+      <div class="col-6 col-md-4">
+        <label for="staff-last" class="form-label small">Nom <span class="text-secondary">(optionnel)</span></label>
+        <input type="text" id="staff-last" name="last_name" class="form-control" maxlength="50" autocomplete="off">
+      </div>
+      <div class="col-12 col-md-4">
+        <label for="staff-job" class="form-label small">Poste</label>
+        <select id="staff-job" name="job" class="form-select" required>
+          {% for key, label in mf_jobs.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        {{ phone_field("phone", "Téléphone", id="staff-phone", label_class="form-label small",
+                       optional_hint=True, help="Pour envoyer l'invitation par WhatsApp.") }}
+      </div>
+      <div class="col-md-6">
+        <label for="staff-email" class="form-label small">Email de l'employé</label>
+        <input type="email" id="staff-email" name="email" class="form-control" maxlength="120"
+               autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email" required>
+      </div>
+      <div class="col-12 d-flex justify-content-end">
+        <button type="submit" class="btn btn-primary px-4"><i class="bi bi-send me-1"></i>Inviter</button>
+      </div>
+    </form>
+  </div></div>
+
+  <div class="card mf-section-card"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-3">Membres de l'équipe ({{ rows|length }})</h2>
+    {% if rows %}
+      <div class="mf-team-list">
+      {% for row in rows %}{% set u = row.user %}
+        <div class="mf-team-row {{ 'is-disabled' if row.status == 'disabled' }}">
+          <div class="mf-team-avatar"><i class="bi bi-person"></i></div>
+          <div class="mf-team-main">
+            {% set sp = (mf_staff_profiles or {}).get(u.id) %}
+            <div class="fw-semibold text-break">{{ (sp.full_name if sp and sp.full_name) or row.name or u.email }}
+              {% if sp and sp.job %}<span class="badge mf-sa-badge-info">{{ mf_jobs.get(sp.job, sp.job) }}</span>{% endif %}
+              {% if row.status == 'active' %}<span class="badge mf-sa-badge-ok">Actif</span>
+              {% elif row.status == 'pending' %}<span class="badge mf-sa-badge-warning">Invitation en attente</span>
+              {% else %}<span class="badge mf-sa-badge-muted">Désactivé</span>{% endif %}
+            </div>
+            <div class="small text-secondary text-break">
+              {% if (sp and sp.full_name) or row.name %}{{ u.email }} · {% endif %}
+              {% if sp and sp.phone %}<a href="https://wa.me/{{ sp.phone|wa_number }}" target="_blank" rel="noopener" class="text-secondary"><i class="bi bi-whatsapp"></i> {{ sp.phone }}</a> · {% endif %}
+              {% if row.status == 'pending' %}invité le {{ row.invited }}
+              {% elif row.last_login %}dernière connexion le {{ row.last_login }}
+              {% else %}jamais connecté{% endif %}
+            </div>
+          </div>
+          <div class="mf-team-actions">
+            {% if row.status == 'pending' %}
+              <form method="post" action="{{ url_for('staff_resend', user_id=u.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-secondary" type="submit"><i class="bi bi-arrow-repeat me-1"></i>Renvoyer</button>
+              </form>
+            {% endif %}
+            {% if row.status == 'disabled' %}
+              <form method="post" action="{{ url_for('staff_enable', user_id=u.id) }}" data-mf-sudo>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-success" type="submit"><i class="bi bi-person-check me-1"></i>Réactiver</button>
+              </form>
+              <form method="post" action="{{ url_for('admin_team_delete', user_id=u.id) }}" data-mf-sudo
+                    data-mf-sudo-confirm="Supprimer définitivement ce compte ? Son historique reste dans le journal de sécurité.">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-danger border-0" type="submit" aria-label="Supprimer {{ u.email }}" title="Supprimer définitivement"><i class="bi bi-trash3"></i></button>
+              </form>
+            {% else %}
+              <form method="post" action="{{ url_for('staff_disable', user_id=u.id) }}" data-mf-sudo
+                    data-mf-sudo-confirm="Désactiver ce compte ? La personne sera déconnectée immédiatement.">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-person-slash me-1"></i>Désactiver</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-secondary small mb-0">Aucun membre d'équipe pour l'instant.</p>
+    {% endif %}
+  </div></div>
+</div>
+
+{# Confirmation par mot de passe pour les actions sensibles (valable {{ sudo_minutes }} min). #}
+<div class="modal fade" id="mf-sudo-modal" tabindex="-1" aria-labelledby="mf-sudo-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <form class="modal-content" id="mf-sudo-form" autocomplete="off">
+      <div class="modal-header border-0">
+        <h5 class="modal-title" id="mf-sudo-title"><i class="bi bi-shield-lock me-2"></i>Confirmez votre identité</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-secondary mb-2" id="mf-sudo-text">Par sécurité, saisissez votre mot de passe. Il ne vous sera plus demandé pendant {{ sudo_minutes }} minutes.</p>
+        <input type="text" name="username" value="{{ current_user.email }}" autocomplete="username" class="d-none" readonly tabindex="-1" aria-hidden="true">
+        <label for="mf-sudo-password" class="form-label small fw-semibold">Votre mot de passe</label>
+        <input type="password" id="mf-sudo-password" class="form-control" autocomplete="current-password" maxlength="128" required>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary">Confirmer</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<style>
+  .mf-team-list { display: flex; flex-direction: column; }
+  .mf-team-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--mf-border); }
+  .mf-team-row:last-child { border-bottom: 0; }
+  .mf-team-row.is-disabled .mf-team-main { opacity: .55; }
+  .mf-team-avatar { width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--mf-accent-light); color: var(--mf-accent-dark); }
+  .mf-team-main { flex: 1 1 auto; min-width: 0; }
+  .mf-team-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+  @media (max-width: 575.98px) {
+    .mf-team-row { flex-wrap: wrap; }
+    .mf-team-actions { width: 100%; justify-content: flex-start; padding-left: 50px; }
+  }
+</style>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var sudoActive = {{ 'true' if mf_sudo_active else 'false' }};
+  var modalEl = document.getElementById("mf-sudo-modal");
+  var pwd = document.getElementById("mf-sudo-password");
+  var text = document.getElementById("mf-sudo-text");
+  var defaultText = text.textContent;
+  var pending = null;
+
+  // Le garde « anti double envoi » (forms_security.js) a déjà désactivé le
+  // bouton : on le réarme, car l'envoi a été suspendu pour la confirmation.
+  function rearm(form) {
+    form.dataset.mfSubmitting = "0";
+    form.querySelectorAll('button[type="submit"]').forEach(function (b) {
+      b.disabled = false;
+      if (b.dataset.mfLabel) b.innerHTML = b.dataset.mfLabel;
+    });
+  }
+
+  function submit(form) {
+    rearm(form);
+    form.dataset.mfSudoOk = "1";
+    if (form.requestSubmit) form.requestSubmit(); else form.submit();
+  }
+
+  document.querySelectorAll("form[data-mf-sudo]").forEach(function (form) {
+    form.addEventListener("submit", function (e) {
+      if (form.dataset.mfSudoOk === "1") return;
+      e.preventDefault();
+      setTimeout(function () { rearm(form); }, 0);
+      var question = form.dataset.mfSudoConfirm;
+      if (sudoActive) {
+        if (!question || window.confirm(question)) submit(form);
+        return;
+      }
+      pending = form;
+      text.textContent = (question ? question + " " : "") + defaultText;
+      pwd.value = "";
+      bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    });
+  });
+
+  modalEl.addEventListener("shown.bs.modal", function () { pwd.focus(); });
+
+  document.getElementById("mf-sudo-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (!pending || !pwd.value) return;
+    var input = pending.querySelector('input[name="confirm_password"]');
+    if (!input) {
+      input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "confirm_password";
+      pending.appendChild(input);
+    }
+    input.value = pwd.value;
+    pwd.value = "";
+    bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+    submit(pending);
+  });
+});
+</script>
+{% endblock %}

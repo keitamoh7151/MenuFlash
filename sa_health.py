@@ -1,5 +1,5 @@
 """
-MenuFlash Mini — Santé d'activité des restaurants clients (super-admin).
+MenuFlash — Santé d'activité des restaurants clients (super-admin).
 
 Branché par sa_suite.py (voir sa_suite.init_sa_suite).
 

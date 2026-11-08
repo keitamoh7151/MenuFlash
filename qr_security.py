@@ -1,5 +1,5 @@
 """
-MenuFlash Mini — QR codes de table SÉCURISÉS : l'adresse ne contient que le NOM de la table, et on ne
+MenuFlash — QR codes de table SÉCURISÉS : l'adresse ne contient que le NOM de la table, et on ne
 peut plus changer de table en la modifiant.
 
 Branchement dans app.py, JUSTE AVANT « from hardening import init_hardening »

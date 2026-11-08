@@ -1,5 +1,5 @@
 """
-MenuFlash Mini — point d'entrée Flask
+MenuFlash — point d'entrée Flask
 Menu affiché par QR code + commande en ligne (sans paiement en ligne).
 + Page de présentation (landing page) publique + inscription en
   libre-service, avec le même langage visuel appliqué à l'ensemble du
@@ -18,7 +18,7 @@ Menu affiché par QR code + commande en ligne (sans paiement en ligne).
   plusieurs établissements, et basculer entre eux depuis un sélecteur.
 + IDENTITÉ VISUELLE DU RESTAURANT (marque blanche partielle) : la barre
   de navigation du back-office affiche le NOM et le LOGO du restaurant
-  actif, à la place de la marque "MenuFlash Mini".
+  actif, à la place de la marque "MenuFlash".
 + NAVIGATION RÉORGANISÉE EN MENUS DÉROULANTS (templates/_admin_navbar.html).
 + IMAGES PERMANENTES : logos et photos de plats sont stockés dans la base
   de données (voir media_store.py) au lieu du disque du serveur, qui est
@@ -389,11 +389,11 @@ def send_verification_email(user):
     link = url_for("verify_email", token=token, _external=True)
     send_transactional_email(
         app, user.email,
-        subject="Confirmez votre adresse email — MenuFlash Mini",
+        subject="Confirmez votre adresse email — MenuFlash",
         body_text=(
             f"Bonjour,\n\nConfirmez votre adresse email en cliquant sur ce lien "
             f"(valable 24 heures) :\n{link}\n\nSi vous n'êtes pas à l'origine de "
-            f"cette inscription, ignorez ce message.\n\nL'équipe MenuFlash Mini"
+            f"cette inscription, ignorez ce message.\n\nL'équipe MenuFlash"
         ),
     )
 
@@ -403,13 +403,13 @@ def send_password_reset_email(user):
     link = url_for("reset_password", token=token, _external=True)
     send_transactional_email(
         app, user.email,
-        subject="Réinitialisation de votre mot de passe — MenuFlash Mini",
+        subject="Réinitialisation de votre mot de passe — MenuFlash",
         body_text=(
             f"Bonjour,\n\nVous avez demandé à réinitialiser votre mot de passe. "
             f"Ce lien est valable 1 heure et ne peut être utilisé qu'une seule "
             f"fois :\n{link}\n\nSi vous n'êtes pas à l'origine de cette demande, "
             f"ignorez ce message : votre mot de passe actuel reste inchangé.\n\n"
-            f"L'équipe MenuFlash Mini"
+            f"L'équipe MenuFlash"
         ),
     )
 
@@ -485,7 +485,7 @@ def signup():
 
     login_user(owner)
     flash(
-        f"Bienvenue sur MenuFlash Mini ! Votre essai gratuit de {get_trial_days()} jours a commencé. "
+        f"Bienvenue sur MenuFlash ! Votre essai gratuit de {get_trial_days()} jours a commencé. "
         f"Votre menu est accessible à l'adresse /m/{slug}. Pensez à confirmer votre email "
         f"(lien envoyé à {owner_email}), et à ajouter le logo de votre restaurant depuis "
         f"la page Apparence.",
@@ -1741,7 +1741,7 @@ def admin_appearance_logo():
                      "Logo du restaurant mis à jour.")
     db.session.commit()
     flash("Logo mis à jour avec succès. Il remplace désormais la marque "
-          "« MenuFlash Mini » sur votre tableau de bord et sur votre menu public.", "success")
+          "« MenuFlash » sur votre tableau de bord et sur votre menu public.", "success")
     return redirect(url_for("admin_appearance"))
 
 

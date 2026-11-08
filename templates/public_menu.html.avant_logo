@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+{# Mode du menu (takeaway.py) : « table » = QR code d'une table, commande sur place ;
+   « remote » = lien général, commande à emporter uniquement. #}
+{% set tk = mf_takeaway or {'mode': 'table' if table_label else 'remote', 'table': table_label, 'state': 'disabled'} %}
+{% set remote = tk.mode == 'remote' %}
+{% set can_order = (not remote) or tk.state == 'open' %}
+{% set body_class = '' if can_order else 'mf-browse-only' %}
+{% block title %}{{ restaurant.name }} — Menu{% endblock %}
+
+{% block theme_override %}
+<style>
+  :root {
+    --mf-accent: {{ restaurant.theme_colors.accent }};
+    --mf-accent-dark: {{ restaurant.theme_colors.accent_dark }};
+    --mf-accent-light: {{ restaurant.theme_colors.accent_light }};
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+
+<script id="mf-i18n-data" type="application/json">{{ translations|tojson }}</script>
+<script id="mf-suggestions-data" type="application/json">{{ item_suggestions|tojson }}</script>
+<script id="mf-popular-data" type="application/json">{{ (popular_ids or [])|tojson }}</script>
+
+<header class="mf-hero">
+  <div class="mf-lang-toggle" role="group" aria-label="Choisir la langue / Choose language">
+    <i class="bi bi-translate mf-lang-icon"></i>
+    <button type="button" class="mf-lang-btn active" data-lang="fr">FR</button>
+    <button type="button" class="mf-lang-btn" data-lang="en">EN</button>
+  </div>
+
+  {% if restaurant.logo_url %}
+    <img src="{{ restaurant.logo_url }}" alt="{{ restaurant.name }}" class="mf-logo">
+  {% endif %}
+  <h1 class="mb-1">{{ restaurant.name }}</h1>
+  {% if mf_info and mf_info.description %}
+    <p class="mf-subtitle mb-2 mx-auto" style="max-width: 520px;">{{ mf_info.description }}</p>
+  {% else %}
+    <p class="mf-subtitle mb-2" data-i18n="brand_tagline">Choisissez vos plats et envoyez votre commande</p>
+  {% endif %}
+  {% if not remote and tk.table %}
+    <span class="badge rounded-pill mf-table-badge px-3 py-2"><i class="bi bi-cup-hot-fill me-1"></i>{{ tk.table }}</span>
+  {% endif %}
+</header>
+
+<button type="button" class="btn btn-dark rounded-pill shadow mf-myorders-fab" id="my-orders-toggle"
+        data-bs-toggle="offcanvas" data-bs-target="#my-orders-offcanvas">
+  <i class="bi bi-receipt"></i>
+  <span data-i18n="my_orders">Mes commandes</span>
+  <span class="badge rounded-pill bg-danger d-none" id="my-orders-badge">0</span>
+</button>
+
+<div class="mf-addmode-banner d-none" id="addmode-banner">
+  <div class="container d-flex align-items-center gap-2 flex-wrap" style="max-width: 680px;">
+    <i class="bi bi-plus-circle-fill"></i>
+    <span data-i18n="addmode_banner_prefix">Vous ajoutez des plats à la commande</span>&nbsp;<strong id="addmode-order-ref">#—</strong>
+    <button type="button" class="btn btn-sm btn-outline-light ms-auto" id="addmode-cancel" data-i18n="addmode_cancel">Annuler</button>
+  </div>
+</div>
+
+{% if categories %}
+<nav class="mf-nav-pills container">
+  {% for category in categories %}
+    <a class="nav-link" href="#cat-{{ category.id }}">{{ category.name }}</a>
+  {% endfor %}
+</nav>
+{% endif %}
+
+<form method="post" action="{{ url_for('place_order', slug=restaurant.slug) }}" id="order-form"
+      data-currency="{{ restaurant.currency }}" data-slug="{{ restaurant.slug }}"
+      data-order-mode="{{ 'remote' if remote else 'table' }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="table_label" value="{{ '' if remote else (tk.table or '') }}">
+  <input type="hidden" name="qr_id" value="{{ '' if remote else request.args.get('qr', '') }}">
+
+  <main class="container" style="max-width: 680px; padding-bottom: 110px;">
+    {% if remote and categories %}
+      <div class="mf-tk-banner {{ '' if can_order else 'is-browse' }}" role="status">
+        <i class="bi {{ 'bi-bag-check-fill' if can_order else 'bi-info-circle-fill' }}" aria-hidden="true"></i>
+        <div class="min-w-0">
+          {% if can_order %}
+            <strong data-i18n="tk_banner_title">Commande à emporter</strong>
+          {% else %}
+            <strong data-i18n="tk_browse_title">Menu en consultation</strong>
+            <div data-i18n="{{ 'tk_paused_text' if tk.state == 'paused' else 'tk_browse_text' }}">{{ "Les commandes à emporter sont suspendues pour le moment." if tk.state == 'paused' else "Les commandes à distance ne sont pas disponibles pour le moment." }}</div>
+          {% endif %}
+          <div class="mf-tk-banner-hint" data-i18n="tk_banner_text">Pour manger sur place, scannez le QR code de votre table ou commandez à la caisse.</div>
+        </div>
+      </div>
+    {% endif %}
+    {% if categories %}
+      <div class="mf-pub-search" role="search">
+        <i class="bi bi-search" aria-hidden="true"></i>
+        <input type="search" id="mf-pub-search" class="form-control" maxlength="60" autocomplete="off"
+               enterkeyhint="search" placeholder="Rechercher un plat…" aria-label="Rechercher un plat">
+        <button type="button" class="mf-pub-search-clear d-none" aria-label="Effacer la recherche"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <section id="mf-popular" class="mf-popular d-none" aria-labelledby="mf-popular-title">
+        <h2 class="mf-category-title fs-5" id="mf-popular-title"><i class="bi bi-fire me-1"></i><span>Les plus commandés</span></h2>
+        <div class="mf-popular-track" id="mf-popular-track"></div>
+      </section>
+      <p class="mf-pub-noresult d-none" id="mf-pub-noresult" role="status"></p>
+    {% endif %}
+    {% for category in categories %}
+      <section id="cat-{{ category.id }}" class="pt-2 mf-menu-section" style="scroll-margin-top: 80px;">
+        <h2 class="mf-category-title fs-5">{{ category.name }}</h2>
+
+        {% for item in category.items if item.is_available %}
+          <div class="card mf-item-card hover-lift mb-3" data-mf-item="{{ item.id }}"
+               data-search="{{ item.name }} {{ item.description or '' }}">
+            <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+              {% if item.photo_url %}
+                <img src="{{ item.photo_url }}" alt="{{ item.name }}" class="mf-item-img" loading="lazy">
+              {% else %}
+                <div class="mf-item-noimg"><i class="bi bi-egg-fried"></i></div>
+              {% endif %}
+              <div class="flex-grow-1" style="min-width: 140px;">
+                <h3 class="h6 mb-1">{{ item.name }}</h3>
+                {% if item.description %}<p class="mf-item-desc mb-1">{{ item.description }}</p>{% endif %}
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <p class="mf-item-price mb-0">{{ "{:,}".format(item.price).replace(",", " ") }} {{ restaurant.currency }}</p>
+                  <span class="mf-prep-chip">
+                    <i class="bi bi-clock-history"></i> ~{{ item.prep_minutes }} <span data-i18n="prep_time_min">min</span>
+                  </span>
+                  {% if ratings.get(item.id) %}
+                    <span class="mf-rating-chip">
+                      <i class="bi bi-star-fill"></i> {{ ratings[item.id].avg }}
+                      <span class="text-secondary">· {{ ratings[item.id].count }} <span data-i18n="reviews_suffix">avis</span></span>
+                    </span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="mf-qty-group d-flex align-items-center gap-2 ms-auto" data-item-id="{{ item.id }}" data-price="{{ item.price }}" data-name="{{ item.name }}">
+                <input type="hidden" name="qty_{{ item.id }}" value="0">
+                <button type="button" class="btn btn-outline-secondary mf-qty-minus">−</button>
+                <span class="mf-qty-value">0</span>
+                <button type="button" class="btn btn-outline-secondary mf-qty-plus">+</button>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </section>
+    {% endfor %}
+
+    {% if categories %}
+      <div class="mt-4 mf-notes-wrap">
+        <label for="notes" class="form-label fw-semibold small text-secondary" data-i18n="notes_label">Une précision pour la cuisine ? (optionnel)</label>
+        <textarea id="notes" name="notes" class="form-control" rows="2" data-i18n-placeholder="notes_placeholder" placeholder="Ex : sans piment, allergie à l'arachide…" maxlength="300"></textarea>
+      </div>
+    {% else %}
+      <p class="text-center text-secondary py-5" data-i18n="menu_empty">Le menu sera bientôt disponible.</p>
+    {% endif %}
+  </main>
+
+  {% if categories %}
+    <div class="mf-cart-bar" id="cart-bar">
+      <div class="container d-flex align-items-center justify-content-between" style="max-width: 680px;">
+        <div>
+          <div id="cart-count" class="small">0 <span data-i18n="cart_article_other">articles</span></div>
+          <div id="cart-total" class="mf-cart-total">0 {{ restaurant.currency }}</div>
+        </div>
+        <button type="button" id="cart-submit" class="btn btn-primary px-4" disabled>
+          <span id="cart-submit-label" data-i18n="cart_submit_default">Voir ma commande</span> <i class="bi bi-arrow-right ms-1"></i>
+        </button>
+      </div>
+    </div>
+  {% endif %}
+    {% if remote and can_order %}
+    {# --------- Fenêtre « À emporter » (lien général) : DANS le formulaire pour être envoyée avec la commande --------- #}
+    <div class="modal fade mf-tk-modal" id="mf-takeaway-modal" tabindex="-1" aria-labelledby="mf-tk-title" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="mf-tk-grip" aria-hidden="true"></div>
+          <div class="modal-header border-0 pb-1">
+            <div class="min-w-0">
+              <h5 class="modal-title" id="mf-tk-title"><i class="bi bi-bag-check me-2"></i><span data-i18n="tk_title">Commande à emporter</span></h5>
+              <div class="small text-secondary" id="mf-tk-summary"></div>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+          </div>
+          <div class="modal-body pt-2">
+            <input type="hidden" name="fulfillment" value="takeaway">
+            <div class="alert alert-danger small d-none" id="mf-tk-error" role="alert" aria-live="assertive"></div>
+
+            <div class="mb-3">
+              <label class="form-label small fw-semibold" for="tk-name" data-i18n="tk_name">Votre prénom</label>
+              <input id="tk-name" name="customer_name" class="form-control" minlength="2" maxlength="60"
+                     autocomplete="given-name" autocapitalize="words" spellcheck="false" required>
+            </div>
+
+            <div class="mb-3 mf-phone-field" data-mf-phone data-check-url="{{ url_for('phone_check') }}">
+              <label class="form-label small fw-semibold" for="tk-phone" data-i18n="tk_phone">Téléphone</label>
+              <div class="mf-phone-group">
+                <select name="customer_phone_country" class="form-select mf-phone-country" data-mf-phone-country aria-label="Pays du numéro">
+                  {% for code, cname, dial, example in PHONE_COUNTRIES %}
+                    <option value="{{ code }}" data-dial="{{ dial }}" data-example="{{ example }}" {{ 'selected' if code == DEFAULT_PHONE_COUNTRY }}>{{ cname }} ({{ dial }})</option>
+                  {% endfor %}
+                </select>
+                <input type="tel" id="tk-phone" name="customer_phone" class="form-control mf-phone-number" data-mf-phone-input
+                       inputmode="tel" autocomplete="tel-national" maxlength="30" aria-describedby="tk-phone-msg" required>
+              </div>
+              <div class="mf-phone-msg form-text" id="tk-phone-msg" data-mf-phone-msg aria-live="polite" data-i18n="tk_phone_hint">Le restaurant vous appellera seulement en cas de besoin.</div>
+            </div>
+
+            <fieldset class="mb-3">
+              <legend class="form-label small fw-semibold mb-1" data-i18n="tk_pickup">Heure de retrait</legend>
+              <div class="mf-tk-when">
+                {% if tk.allow_asap %}
+                  <input type="radio" class="btn-check" name="pickup_type" id="tk-asap" value="asap" checked>
+                  <label class="mf-tk-option" for="tk-asap"><i class="bi bi-lightning-charge-fill"></i>
+                    <span><strong data-i18n="tk_asap">Dès que possible</strong><small>~{{ tk.asap_time }} · {{ tk.prep_minutes }} min</small></span></label>
+                {% endif %}
+                {% if tk.slots %}
+                  <input type="radio" class="btn-check" name="pickup_type" id="tk-later" value="scheduled" {{ 'checked' if not tk.allow_asap }}>
+                  <label class="mf-tk-option" for="tk-later"><i class="bi bi-calendar-event"></i>
+                    <span><strong data-i18n="tk_schedule">Choisir une heure</strong><small data-i18n="tk_schedule_hint">Aujourd'hui ou plus tard</small></span></label>
+                {% endif %}
+              </div>
+              {% if tk.slots %}
+                <select class="form-select mt-2 {{ 'd-none' if tk.allow_asap }}" name="pickup_at" id="tk-slot"
+                        aria-label="Créneau de retrait" {{ 'disabled' if tk.allow_asap else 'required' }}>
+                  <option value="" data-i18n="tk_slot_placeholder">Choisissez un créneau…</option>
+                  {% for d in tk.slots %}
+                    <optgroup label="{{ d.label }}" {% if d.key %}data-i18n-label="{{ d.key }}"{% endif %}>
+                      {% for x in d.slots %}<option value="{{ x.value }}" {{ 'disabled' if x.full }}>{{ x.label }}{% if x.full %} (complet){% endif %}</option>{% endfor %}
+                    </optgroup>
+                  {% endfor %}
+                </select>
+              {% endif %}
+              {% if not tk.allow_asap and not tk.has_slot %}
+                <div class="alert alert-warning small mt-2 mb-0" data-i18n="tk_no_slot">Aucun créneau de retrait n'est disponible pour le moment.</div>
+              {% endif %}
+            </fieldset>
+
+            <div class="mb-2">
+              <label class="form-label small fw-semibold" for="tk-email"><span data-i18n="tk_email">Email pour être prévenu quand c'est prêt</span>
+                <span class="text-secondary fw-normal" data-i18n="tk_optional">(optionnel)</span></label>
+              <input id="tk-email" type="email" name="customer_email" class="form-control" maxlength="160"
+                     autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false">
+            </div>
+            <p class="small text-secondary mb-0 d-flex gap-2"><i class="bi bi-cash-coin"></i>
+              <span data-i18n="tk_payment">Paiement au retrait. Vous pouvez annuler tant que la préparation n'a pas commencé.</span></p>
+          </div>
+          <div class="modal-footer border-0 flex-nowrap">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="tk_back">Retour</button>
+            <button type="button" class="btn btn-primary flex-grow-1" id="mf-tk-confirm" {{ 'disabled' if not tk.allow_asap and not tk.has_slot }}>
+              <span class="confirm-label" data-i18n="tk_confirm">Confirmer la commande</span>
+              <span class="spinner-border spinner-border-sm d-none ms-1" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+</form>
+
+<div class="modal fade" id="order-recap-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title" id="order-recap-title" data-i18n="recap_title_default">Récapitulatif de votre commande</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="order-recap-body"></div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="recap_modify">Modifier</button>
+        <button type="button" class="btn btn-primary" id="order-recap-confirm">
+          <span class="confirm-label">Confirmer l'envoi</span>
+          <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="cancel-order-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-body text-center p-4">
+        <div class="mb-3"><i class="bi bi-exclamation-triangle-fill text-danger" style="font-size: 2.2rem;"></i></div>
+        <h5 class="mb-2" data-i18n="cancel_order_confirm_title">Annuler cette commande ?</h5>
+        <p class="text-secondary small mb-0" data-i18n="cancel_order_confirm_body">Cette action est définitive. La cuisine sera informée immédiatement.</p>
+      </div>
+      <div class="modal-footer border-0 justify-content-center pb-4">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="cancel_order_confirm_no">Non, garder</button>
+        <button type="button" class="btn btn-danger" id="cancel-order-confirm-btn">
+          <span class="confirm-label" data-i18n="cancel_order_confirm_yes">Oui, annuler</span>
+          <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="offcanvas offcanvas-end" tabindex="-1" id="my-orders-offcanvas">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title"><i class="bi bi-receipt me-2"></i><span data-i18n="my_orders">Mes commandes</span></h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+  </div>
+  <div class="offcanvas-body">
+    <p class="text-secondary small" id="my-orders-empty" data-i18n="my_orders_empty">
+      Vous n'avez pas encore passé de commande. Ajoutez des plats et envoyez votre commande pour la voir apparaître ici.
+    </p>
+    <div id="my-orders-list"></div>
+  </div>
+</div>
+
+{% if mf_info and (mf_info.address or mf_info.district or mf_info.public_phone or mf_info.facebook or mf_info.instagram) %}
+<section class="container mf-resto-info" style="max-width: 680px;">
+  <div class="card mf-item-card"><div class="card-body small">
+    <div class="fw-bold mb-2">{{ restaurant.name }}</div>
+    {% if mf_info.address or mf_info.district or mf_info.city %}
+      <div class="mb-1"><i class="bi bi-geo-alt-fill me-1" style="color: var(--mf-accent);"></i>{{ [mf_info.address, mf_info.district, mf_info.city]|select|join(', ') }}</div>
+    {% endif %}
+    {% if mf_info.public_phone %}
+      <div class="mb-1"><i class="bi bi-telephone-fill me-1" style="color: var(--mf-accent);"></i><a href="tel:{{ mf_info.public_phone|replace(' ', '') }}">{{ mf_info.public_phone }}</a></div>
+    {% endif %}
+    {% if mf_info.facebook or mf_info.instagram %}
+      <div class="d-flex gap-3 mt-2">
+        {% if mf_info.facebook %}<a href="{{ mf_info.facebook }}" target="_blank" rel="noopener nofollow"><i class="bi bi-facebook me-1"></i>Facebook</a>{% endif %}
+        {% if mf_info.instagram %}<a href="{{ mf_info.instagram }}" target="_blank" rel="noopener nofollow"><i class="bi bi-instagram me-1"></i>Instagram</a>{% endif %}
+      </div>
+    {% endif %}
+  </div></div>
+</section>
+{% endif %}
+
+<footer class="text-center text-secondary small py-4">
+  <span data-i18n="footer_powered">Propulsé par</span> <strong class="text-dark">MenuFlash Mini</strong>
+</footer>
+{% endblock %}
+
+

@@ -6,7 +6,7 @@
 
    Deux changements majeurs par rapport à la version précédente :
    1. MARQUE DU RESTAURANT (pas de l'application) : le logo et le nom du
-      restaurant actif remplacent "MenuFlash Mini" — conformément à la
+      restaurant actif remplacent "MenuFlash" — conformément à la
       demande du restaurateur de voir SON établissement, pas la
       plateforme, une fois connecté à son tableau de bord. Si aucun logo
       n'a été téléversé, une icône générique de boutique s'affiche à la
@@ -20,7 +20,7 @@
       "Compte" (sécurité du compte connecté).
 
    Ce partiel n'est PAS utilisé par le panel super-admin (qui garde sa
-   propre barre "MenuFlash Mini · Panel super-admin", car il ne gère pas
+   propre barre "MenuFlash · Panel super-admin", car il ne gère pas
    un restaurant précis mais l'ensemble de la plateforme).
    ========================================================================== #}
 <nav class="navbar navbar-expand-lg mf-navbar sticky-top">
@@ -32,7 +32,7 @@
       {% else %}
         <span class="mf-navbar-logo-placeholder"><i class="bi bi-shop"></i></span>
       {% endif %}
-      <span>{{ restaurant.name if restaurant else "MenuFlash Mini" }}</span>
+      <span>{{ restaurant.name if restaurant else "MenuFlash" }}</span>
       {% if not current_user.is_owner %}
         <span class="badge rounded-pill mf-cuisine-badge ms-1">Cuisine</span>
       {% endif %}

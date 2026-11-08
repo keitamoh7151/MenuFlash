@@ -1,5 +1,5 @@
 """
-MenuFlash Mini — Service en salle : horaires d'ouverture + appel du serveur.
+MenuFlash — Service en salle : horaires d'ouverture + appel du serveur.
 
 Branchement dans app.py, JUSTE AVANT `from backups import init_backups` :
 

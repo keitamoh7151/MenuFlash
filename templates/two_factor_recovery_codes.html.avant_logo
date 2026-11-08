@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Codes de secours — MenuFlash Mini{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card p-2" style="max-width: 480px;">
+    <div class="card-body p-4">
+      <div class="text-center mb-3">
+        <i class="bi bi-check-circle-fill" style="font-size: 1.8rem; color: var(--mf-success);"></i>
+        <h1 class="h5 fw-bold mt-2 mb-1">{{ 'Double authentification activée' if first_time else 'Nouveaux codes de secours' }}</h1>
+      </div>
+      <div class="alert alert-warning small">
+        <strong>Notez ces codes maintenant : ils ne seront plus jamais affichés.</strong>
+        Chacun permet une seule connexion si vous perdez votre téléphone.
+        {% if not first_time %}Les anciens codes ne fonctionnent plus.{% endif %}
+      </div>
+      <div class="row g-2 mb-3" id="mf-recovery-codes">
+        {% for c in codes %}<div class="col-6"><code class="d-block text-center p-2 rounded mf-sa-soft fs-6">{{ c }}</code></div>{% endfor %}
+      </div>
+      <div class="d-flex gap-2 mb-3">
+        <button type="button" class="btn btn-outline-secondary btn-sm flex-grow-1 mf-copy-btn"
+                data-copy-text="Codes de secours MenuFlash Mini ({{ email }}) :&#10;{{ codes|join('&#10;') }}">
+          <i class="bi bi-clipboard me-1"></i>Copier</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm flex-grow-1" onclick="window.print()">
+          <i class="bi bi-printer me-1"></i>Imprimer</button>
+      </div>
+      <a href="{{ url_for('super_admin_dashboard') }}" class="btn btn-primary w-100 py-2">J'ai noté mes codes, continuer</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

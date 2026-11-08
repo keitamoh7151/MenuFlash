@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{# Pages légales (hardening.py). Modèle de départ, à faire relire par un juriste. #}
+{% set titles = {'terms': "Conditions d'utilisation", 'privacy': 'Politique de confidentialité', 'notice': 'Mentions légales'} %}
+{% block title %}{{ titles[page] }} — MenuFlash Mini{% endblock %}
+{% block extra_head %}
+<style>
+  .mf-legal { max-width: 820px; }
+  .mf-legal h2 { font-size: 1.05rem; font-weight: 700; margin-top: 1.6rem; }
+  .mf-legal p, .mf-legal li { color: var(--mf-ink); line-height: 1.6; }
+  .mf-legal-nav a { text-decoration: none; }
+  .mf-legal-nav a.active { font-weight: 700; color: var(--mf-ink); }
+</style>
+{% endblock %}
+{% block content %}
+<nav class="mf-landing-nav" style="background: var(--mf-ink);">
+  <div class="container d-flex align-items-center justify-content-between py-3">
+    <a href="{{ url_for('landing') }}" class="text-white fw-bold text-decoration-none">
+      <i class="bi bi-qr-code-scan me-1" style="color: var(--mf-accent);"></i>MenuFlash <span style="color: var(--mf-accent);">Mini</span></a>
+  </div>
+</nav>
+<main class="container mf-legal py-4">
+  <div class="mf-legal-nav small d-flex flex-wrap gap-3 mb-3">
+    <a class="{{ 'active' if page == 'terms' }}" href="{{ url_for('legal_terms') }}">Conditions d'utilisation</a>
+    <a class="{{ 'active' if page == 'privacy' }}" href="{{ url_for('legal_privacy') }}">Confidentialité</a>
+    <a class="{{ 'active' if page == 'notice' }}" href="{{ url_for('legal_notice') }}">Mentions légales</a>
+  </div>
+  <div class="card mf-section-card"><div class="card-body p-4">
+  <h1 class="h4 fw-bold mb-1">{{ titles[page] }}</h1>
+  <p class="small text-secondary">Version {{ legal.version }}</p>
+
+  {% if page == 'notice' %}
+    <h2>Éditeur du service</h2>
+    <p>MenuFlash Mini est édité par <strong>{{ legal.operator }}</strong>, {{ legal.address }}.
+      {% if legal.rccm %}RCCM : {{ legal.rccm }}.{% endif %}<br>
+      Contact : <a href="mailto:{{ legal.email }}">{{ legal.email }}</a>{% if legal.phone %} · {{ legal.phone }}{% endif %}.</p>
+    <h2>Hébergement</h2>
+    <p>L'application et sa base de données sont hébergées par Render Services, Inc. (render.com).
+      Les emails sont envoyés par Brevo (brevo.com).</p>
+    <h2>Propriété intellectuelle</h2>
+    <p>Le logiciel MenuFlash Mini, sa marque et son interface appartiennent à l'éditeur. Les menus, photos, logos et
+      textes publiés par chaque restaurant restent la propriété de ce restaurant, qui en est seul responsable.</p>
+
+  {% elif page == 'privacy' %}
+    <h2>Qui est responsable de vos données ?</h2>
+    <p><strong>Si vous êtes client d'un restaurant</strong> (vous commandez depuis un menu), le restaurant chez qui
+      vous commandez est responsable de vos données. MenuFlash Mini les traite pour son compte, uniquement pour
+      faire fonctionner la commande.<br>
+      <strong>Si vous êtes restaurateur</strong>, {{ legal.operator }} est responsable des données de votre compte.</p>
+
+    <h2>Données collectées</h2>
+    <ul>
+      <li><strong>Clients des restaurants :</strong> contenu de la commande, numéro de table ; pour une commande à
+        emporter, prénom, numéro de téléphone, heure de retrait et, si vous le donnez, adresse email.</li>
+      <li><strong>Restaurateurs et leurs équipes :</strong> nom, prénom, email, téléphone, ville, informations sur le
+        restaurant, historique des connexions.</li>
+      <li><strong>Données techniques :</strong> adresse IP, type d'appareil et de navigateur, journaux de sécurité.</li>
+    </ul>
+    <p>Aucun paiement n'est fait en ligne : aucune donnée bancaire n'est collectée.</p>
+
+    <h2>Pourquoi ?</h2>
+    <ul>
+      <li>Transmettre votre commande à la cuisine et vous en donner le suivi.</li>
+      <li>Permettre au restaurant de vous joindre au sujet d'une commande à emporter. Votre numéro n'est jamais
+        imprimé sur le ticket, ni utilisé pour de la publicité, ni vendu.</li>
+      <li>Vous envoyer les emails liés à votre commande ou à votre compte.</li>
+      <li>Protéger le service contre la fraude et les abus.</li>
+    </ul>
+
+    <h2>Durée de conservation</h2>
+    <ul>
+      <li>Le téléphone et l'email des clients d'une commande à emporter sont effacés {{ legal.days }} jours après le retrait.</li>
+      <li>Les commandes (sans coordonnées) restent dans l'historique du restaurant pour ses statistiques.</li>
+      <li>Les données d'un compte restaurant sont supprimées à la fermeture du compte, après une éventuelle
+        exportation, sauf les informations que la loi impose de conserver.</li>
+    </ul>
+
+    <h2>Qui y a accès ?</h2>
+    <p>Uniquement le restaurant concerné et son équipe, l'éditeur pour la maintenance et le support, et nos
+      prestataires techniques (hébergement Render, envoi d'emails Brevo, stockage des sauvegardes chiffrées).</p>
+
+    <h2>Cookies et stockage sur votre appareil</h2>
+    <p>Nous utilisons uniquement des cookies et un stockage local nécessaires au fonctionnement : session de
+      connexion, protection des formulaires, mémorisation de vos commandes en cours et de la langue choisie.
+      Aucun cookie publicitaire ni de mesure d'audience.</p>
+
+    <h2>Vos droits</h2>
+    <p>Vous pouvez demander l'accès, la rectification ou la suppression de vos données, et vous opposer à leur
+      traitement, en écrivant à <a href="mailto:{{ legal.email }}">{{ legal.email }}</a>. Pour une commande, vous
+      pouvez aussi vous adresser directement au restaurant. Au Mali, ces droits sont prévus par la loi
+      n° 2013-015 du 21 mai 2013 sur la protection des données à caractère personnel ; vous pouvez saisir
+      l'Autorité de Protection des Données à caractère Personnel (APDP).</p>
+
+    <h2>Sécurité</h2>
+    <p>Connexion chiffrée (HTTPS), mots de passe hachés, protection contre les tentatives de connexion répétées,
+      sauvegardes chiffrées, accès limité au restaurant concerné.</p>
+
+  {% else %}
+    <h2>1. Objet</h2>
+    <p>MenuFlash Mini est un service en ligne qui permet à un restaurant de publier son menu par QR code, de recevoir
+      des commandes sur place et à emporter, et de les gérer en cuisine. Ces conditions s'appliquent à tout restaurant
+      qui crée un compte (le « Client ») et à son équipe.</p>
+
+    <h2>2. Compte et sécurité</h2>
+    <p>Le Client fournit des informations exactes et garde ses identifiants confidentiels. Il est responsable de
+      l'activité de son compte et des comptes de son équipe, et signale sans délai toute utilisation anormale.</p>
+
+    <h2>3. Essai, abonnement et paiement</h2>
+    <p>Un essai gratuit est proposé à l'inscription. Le service est ensuite payant selon la formule choisie (Basic ou
+      Pro), au prix affiché au moment du paiement, réglé par les moyens indiqués (Mobile Money, espèces, virement).
+      Sans renouvellement, le menu public n'est plus accessible aux clients ; les données restent conservées.</p>
+
+    <h2>4. Contenu publié par le restaurant</h2>
+    <p>Le Client est seul responsable de son menu : noms, prix, photos, descriptions, <strong>allergènes et
+      composition des plats</strong>, ainsi que du respect des règles d'hygiène et de vente qui s'appliquent à son
+      activité. Il garantit disposer des droits sur les photos et logos publiés.</p>
+
+    <h2>5. Commandes et données des clients</h2>
+    <p>Le contrat de vente du repas est conclu entre le restaurant et son client ; MenuFlash Mini n'en est pas partie.
+      Le paiement des repas se fait au restaurant. Le Client utilise les coordonnées de ses clients uniquement pour
+      traiter leurs commandes, conformément à la <a href="{{ url_for('legal_privacy') }}">politique de confidentialité</a>.</p>
+
+    <h2>6. Utilisation interdite</h2>
+    <p>Il est interdit d'utiliser le service pour des contenus illicites ou trompeurs, de tenter d'accéder aux
+      données d'un autre restaurant, de perturber le service ou de contourner ses protections.</p>
+
+    <h2>7. Disponibilité du service</h2>
+    <p>L'éditeur fait ses meilleurs efforts pour que le service fonctionne en continu, sans pouvoir le garantir
+      (maintenance, panne d'un prestataire, réseau internet ou électricité du restaurant). Le Client conserve un
+      moyen de prendre les commandes sans le service.</p>
+
+    <h2>8. Suspension et résiliation</h2>
+    <p>L'éditeur peut limiter ou suspendre un compte en cas d'impayé ou de non-respect de ces conditions, en
+      indiquant le motif. Le Client peut fermer son compte à tout moment et demander l'export de ses données.</p>
+
+    <h2>9. Responsabilité</h2>
+    <p>La responsabilité de l'éditeur est limitée aux dommages directs et, au maximum, aux sommes payées par le
+      Client au cours des trois derniers mois.</p>
+
+    <h2>10. Modifications et droit applicable</h2>
+    <p>Ces conditions peuvent évoluer ; le Client en est informé dans son tableau de bord. Elles sont soumises au
+      droit malien. Contact : <a href="mailto:{{ legal.email }}">{{ legal.email }}</a>.</p>
+  {% endif %}
+  </div></div>
+</main>
+{% endblock %}

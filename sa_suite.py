@@ -1,5 +1,5 @@
 """
-MenuFlash Mini — Outils d'exploitation du super-admin (point d'entrée unique).
+MenuFlash — Outils d'exploitation du super-admin (point d'entrée unique).
 
 Branchement dans app.py (voir ajouter_branchement.py), APRÈS init_sa_controls(...) :
 

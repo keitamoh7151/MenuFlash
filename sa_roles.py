@@ -217,12 +217,12 @@ def init_sa_roles(app, *, super_admin_required, log_audit, limiter=None):
         token = serializer.dumps({"uid": user.id, "stamp": user.security_stamp}, salt="sa-invite")
         link = url_for("sa_invite_accept", token=token, _external=True)
         send_transactional_email(
-            app, user.email, "Invitation à l'équipe d'administration MenuFlash Mini",
-            f"Bonjour,\n\nVous êtes invité(e) à rejoindre l'équipe d'administration de MenuFlash Mini "
+            app, user.email, "Invitation à l'équipe d'administration MenuFlash",
+            f"Bonjour,\n\nVous êtes invité(e) à rejoindre l'équipe d'administration de MenuFlash "
             f"avec le rôle « {ROLES[role][0]} ».\n\nChoisissez votre mot de passe ici (lien valable 72 heures, "
             f"à usage unique) :\n{link}\n\nUne double authentification (application sur votre téléphone) vous "
             f"sera demandée dès la première connexion.\n\nSi vous n'attendiez pas cette invitation, ignorez ce "
-            f"message.\n\nL'équipe MenuFlash Mini")
+            f"message.\n\nL'équipe MenuFlash")
         session["mf_last_sa_invite"] = {"email": user.email, "link": link}
         return link
 

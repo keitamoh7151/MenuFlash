@@ -1,5 +1,5 @@
 """
-MenuFlash Mini — Vue support d'un restaurant, EN LECTURE SEULE (super-admin).
+MenuFlash — Vue support d'un restaurant, EN LECTURE SEULE (super-admin).
 
 Branché par sa_suite.py.
 

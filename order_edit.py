@@ -1,5 +1,5 @@
 """
-MenuFlash Mini — « Modifier la commande » : le client retire, ajoute ou change la quantité d'un plat.
+MenuFlash — « Modifier la commande » : le client retire, ajoute ou change la quantité d'un plat.
 
 Branchement dans app.py, JUSTE AVANT « from hardening import init_hardening »
 (le script ajouter_modifier_commande.py le fait pour vous) :

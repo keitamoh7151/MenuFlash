@@ -519,3 +519,19 @@ a:hover { color: var(--mf-ink); }
   .mf-lang-icon { margin: 0 2px 0 4px; font-size: 0.95rem; }
   .mf-myorders-fab span { display: none; }
 }
+
+/* ---- Logo MenuFlash (nouveau logo) ---- */
+.mf-brand-logo { display: block; width: auto; max-width: 100%; object-fit: contain; }
+.mf-brand-logo-nav { height: 38px; }
+.mf-brand-plate {
+  display: flex; justify-content: center; align-items: center; margin: 0;
+  background: #351B12; border-bottom: 3px solid #FFAA0A; border-radius: 12px;
+  padding: 14px 16px 10px;
+}
+.mf-brand-plate .mf-brand-logo { height: 64px; }
+.mf-brand-plate-sm { display: inline-flex; padding: 8px 14px 6px; border-radius: 10px; }
+.mf-brand-plate-sm .mf-brand-logo { height: 44px; }
+@media (max-width: 575.98px) {
+  .mf-brand-logo-nav { height: 32px; }
+  .mf-brand-plate .mf-brand-logo { height: 54px; }
+}

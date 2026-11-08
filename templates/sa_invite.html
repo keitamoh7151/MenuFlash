@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Rejoindre l'équipe d'administration — MenuFlash Mini{% endblock %}
+{% block title %}Rejoindre l'équipe d'administration — MenuFlash{% endblock %}
 {% block content %}
 <div class="mf-auth-bg">
   <div class="card mf-auth-card p-2" style="max-width: 440px;">
@@ -8,7 +8,7 @@
         <div class="text-center mb-4">
           <i class="bi bi-person-gear" style="font-size: 1.8rem; color: var(--mf-accent);"></i>
           <h1 class="h5 fw-bold mt-2 mb-1">Bienvenue{{ (' ' ~ name) if name }} !</h1>
-          <p class="text-secondary small mb-0">Choisissez votre mot de passe pour rejoindre l'équipe d'administration de MenuFlash Mini
+          <p class="text-secondary small mb-0">Choisissez votre mot de passe pour rejoindre l'équipe d'administration de MenuFlash
             avec le rôle <strong>{{ role_label }}</strong>. Une double authentification vous sera demandée ensuite.</p>
         </div>
         <form method="post" data-mf-guard autocomplete="on">

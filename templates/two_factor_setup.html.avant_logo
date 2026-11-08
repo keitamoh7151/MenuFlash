@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Activer la double authentification — MenuFlash Mini{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card p-2" style="max-width: 460px;">
+    <div class="card-body p-4">
+      <div class="text-center mb-3">
+        <i class="bi bi-shield-lock-fill" style="font-size: 1.8rem; color: var(--mf-accent);"></i>
+        <h1 class="h5 fw-bold mt-2 mb-1">{{ 'Changer de téléphone' if reconfigure else 'Activer la double authentification' }}</h1>
+        <p class="text-secondary small mb-0">
+          {% if reconfigure %}Scannez ce nouveau QR code avec le nouveau téléphone. L'ancien reste valable tant que vous n'avez pas confirmé.
+          {% else %}Obligatoire pour le compte super-admin : en plus du mot de passe, un code de votre téléphone sera demandé à chaque connexion.{% endif %}
+        </p>
+      </div>
+      <ol class="small ps-3 mb-3">
+        <li>Installez <strong>Google Authenticator</strong> ou <strong>Microsoft Authenticator</strong> sur votre téléphone.</li>
+        <li>Dans l'application, choisissez « Scanner un QR code » :</li>
+      </ol>
+      <div class="text-center mb-2">
+        <img src="{{ qr }}" alt="QR code de configuration" width="200" height="200" style="image-rendering: pixelated;">
+      </div>
+      <details class="small mb-3">
+        <summary>Impossible de scanner ? Saisir la clé à la main</summary>
+        <code class="d-block mt-2 user-select-all" style="letter-spacing: .05em;">{{ secret }}</code>
+      </details>
+      <form method="post" data-mf-guard autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="code" class="form-label small fw-semibold">3. Saisissez le code à 6 chiffres affiché</label>
+        <input type="text" id="code" name="code" class="form-control form-control-lg text-center mb-3"
+               inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code"
+               placeholder="123 456" required autofocus style="letter-spacing: .3em;">
+        <button type="submit" class="btn btn-primary w-100 py-2">Confirmer et activer</button>
+      </form>
+      <p class="text-center small mt-3 mb-0"><a href="{{ url_for('admin_logout') }}" class="text-secondary">Se déconnecter</a></p>
+    </div>
+  </div>
+</div>
+{% endblock %}

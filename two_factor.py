@@ -51,7 +51,7 @@ from models import db, User, LOCKOUT_DURATION_MINUTES
 
 logger = logging.getLogger("menuflash.2fa")
 
-ISSUER = "MenuFlash Mini"
+ISSUER = "MenuFlash"
 PERIOD = 30
 DIGITS = 6
 WINDOW = 1                      # ±1 période (±30 s) de décalage d'horloge

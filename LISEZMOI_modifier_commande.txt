@@ -1,0 +1,39 @@
+Modifier la commande (MenuFlash) : le client retire, ajoute ou change un plat
+
+CE QUE FAIT LE CLIENT
+Tant que la cuisine n'a pas commencé (statut « Nouvelle »), UN SEUL bouton « Modifier la commande »
+apparaît dans « Mes commandes » et sur la page de suivi. Il ouvre une fenêtre :
+  - « − » et « + » changent la quantité d'un plat ;
+  - « Retirer » enlève le plat (avec « Confirmer ? ») ;
+  - « Ajouter d'autres plats » ouvre le menu en mode ajout (le parcours « Ajouter des plats » qui existait) ;
+  - le nouveau total s'affiche aussitôt.
+Le dernier plat ne peut pas être retiré : on propose « Annuler la commande ».
+Un « + » est refusé si le plat est épuisé ou si son prix a changé ; retirer et diminuer restent toujours possibles.
+Une fois la commande « En préparation », le bouton disparaît.
+L'ancien bouton « Ajouter des plats » des cartes est masqué : « Ajouter d'autres plats » le déclenche.
+
+INSTALLATION
+1. Décompressez ce zip dans le dossier du projet (là où se trouve app.py), en gardant le dossier static.
+   Si vous aviez installé la version « Retirer un plat », elle est remplacée (mêmes noms de fichiers).
+2. Dans PowerShell, dans ce dossier :   python ajouter_modifier_commande.py
+   (il branche app.py et templates/base.html, ou met à jour la version précédente ; relançable sans danger)
+3. git add order_edit.py static/order_edit.js ajouter_modifier_commande.py app.py templates/base.html
+   git status      <- order_edit.py et static/order_edit.js : NOUVEAUX (ou modifiés si déjà installés)
+   git commit -m "Modifier la commande : retirer, ajouter ou changer un plat"
+   git push
+   Après le déploiement : Ctrl + F5 (le script passe en version 2 dans base.html).
+
+TEST EN LOCAL (python app.py), 7 minutes
+1. Ouvrez un lien de table, commandez 2 × un plat + 1 autre plat.
+2. « Mes commandes » : « Modifier la commande » puis « Annuler la commande » (plus de « Ajouter des plats »).
+3. « + » : la quantité monte, le total change. Cuisine : la carte se met à jour et le son « commande modifiée » retentit.
+4. « − », puis « Retirer » (deux appuis) sur l'autre plat : il disparaît. Il reste un plat : seul « Annuler » le retire.
+5. « Ajouter d'autres plats » : le menu s'ouvre en mode ajout. Ajoutez un plat : il apparaît dans la commande.
+6. Marquez un plat « Épuisé » (tableau de bord), puis essayez « + » sur ce plat : refusé, avec un message.
+7. En cuisine, « Commencer la préparation », puis essayez de modifier : « Trop tard ».
+8. Ouvrez la commande depuis un autre navigateur : « pas passée depuis cet appareil ».
+9. Ouvrez la page de suivi d'une commande, « Modifier la commande », « Ajouter d'autres plats » : le menu s'ouvre
+   en mode ajout de cette commande.
+
+Si le bouton n'apparaît pas : Render > Logs, cherchez « order_edit ». Un message « modification non activée » indique que
+la route « add_to_order » n'a pas été trouvée ; l'application fonctionne alors comme avant.

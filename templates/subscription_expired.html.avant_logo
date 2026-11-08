@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Menu indisponible{% endblock %}
+{% block content %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card mf-expired-card text-center p-4">
+    <div class="card-body">
+      <div class="mb-3">
+        {% if restaurant.logo_url %}
+          <img src="{{ restaurant.logo_url }}" alt="{{ restaurant.name }}" style="width: 48px; height: 48px; object-fit: cover; border-radius: 50%;">
+        {% else %}
+          <i class="bi bi-qr-code-scan" style="font-size: 1.4rem; color: var(--mf-accent);"></i>
+          <span class="fw-bold" style="color: var(--mf-ink);">MenuFlash<span class="mf-brand-mini">Mini</span></span>
+        {% endif %}
+      </div>
+      <div class="mb-3"><i class="bi bi-emoji-frown" style="font-size: 2.4rem; color: var(--mf-accent);"></i></div>
+      <h1 class="h5 mb-2">Menu temporairement indisponible</h1>
+      <p class="mb-1">{{ restaurant.name }} doit renouveler son abonnement MenuFlash Mini.</p>
+      <p class="text-secondary small mb-0">Contactez le gestionnaire du restaurant pour plus d'informations.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

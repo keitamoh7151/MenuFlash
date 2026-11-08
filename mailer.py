@@ -46,7 +46,7 @@ SMTP_TIMEOUT = 10
 
 def init_mailer(app):
     app.config.setdefault("BREVO_API_KEY", os.environ.get("BREVO_API_KEY", "").strip())
-    app.config.setdefault("MAIL_SENDER_NAME", os.environ.get("MAIL_SENDER_NAME", "MenuFlash Mini").strip())
+    app.config.setdefault("MAIL_SENDER_NAME", os.environ.get("MAIL_SENDER_NAME", "MenuFlash").strip())
     mode = _mode(app)
     sender = app.config.get("MAIL_DEFAULT_SENDER", "")
     if mode == "log":
@@ -94,7 +94,7 @@ def send_transactional_email(app, to, subject, body_text):
 
 def _sender(app):
     return (app.config.get("MAIL_DEFAULT_SENDER") or "").strip(), \
-           (app.config.get("MAIL_SENDER_NAME") or "MenuFlash Mini").strip()
+           (app.config.get("MAIL_SENDER_NAME") or "MenuFlash").strip()
 
 
 def _send_brevo(app, to, subject, body_text):

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Connexion — MenuFlash Mini{% endblock %}
+{% block title %}Connexion — MenuFlash{% endblock %}
 {% block content %}
 {% set fv = session.pop('mf_prefill', {}) %}
 <div class="mf-auth-bg">
@@ -7,10 +7,7 @@
     <div class="card-body p-4">
       <div class="text-center mb-4">
         <a href="{{ url_for('landing') }}" class="text-decoration-none">
-          <i class="bi bi-qr-code-scan" style="font-size: 1.8rem; color: var(--mf-accent);"></i>
-          <h1 class="h5 fw-bold mt-2 mb-0" style="color: var(--mf-ink);">
-            MenuFlash<span class="mf-brand-mini">Mini</span>
-          </h1>
+          <h1 class="mf-brand-plate"><img src="{{ url_for('static', filename='brand/menuflash-logo-sombre.svg') }}" alt="MenuFlash, connexion" class="mf-brand-logo"></h1>
         </a>
       </div>
       <form method="post" data-mf-guard autocomplete="on">

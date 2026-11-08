@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {# Pages légales (hardening.py). Modèle de départ, à faire relire par un juriste. #}
 {% set titles = {'terms': "Conditions d'utilisation", 'privacy': 'Politique de confidentialité', 'notice': 'Mentions légales'} %}
-{% block title %}{{ titles[page] }} — MenuFlash Mini{% endblock %}
+{% block title %}{{ titles[page] }} — MenuFlash{% endblock %}
 {% block extra_head %}
 <style>
   .mf-legal { max-width: 820px; }
@@ -15,7 +15,7 @@
 <nav class="mf-landing-nav" style="background: var(--mf-ink);">
   <div class="container d-flex align-items-center justify-content-between py-3">
     <a href="{{ url_for('landing') }}" class="text-white fw-bold text-decoration-none">
-      <i class="bi bi-qr-code-scan me-1" style="color: var(--mf-accent);"></i>MenuFlash <span style="color: var(--mf-accent);">Mini</span></a>
+      <img src="{{ url_for('static', filename='brand/menuflash-logo-sombre.svg') }}" alt="MenuFlash" class="mf-brand-logo mf-brand-logo-nav"></a>
   </div>
 </nav>
 <main class="container mf-legal py-4">
@@ -30,20 +30,20 @@
 
   {% if page == 'notice' %}
     <h2>Éditeur du service</h2>
-    <p>MenuFlash Mini est édité par <strong>{{ legal.operator }}</strong>, {{ legal.address }}.
+    <p>MenuFlash est édité par <strong>{{ legal.operator }}</strong>, {{ legal.address }}.
       {% if legal.rccm %}RCCM : {{ legal.rccm }}.{% endif %}<br>
       Contact : <a href="mailto:{{ legal.email }}">{{ legal.email }}</a>{% if legal.phone %} · {{ legal.phone }}{% endif %}.</p>
     <h2>Hébergement</h2>
     <p>L'application et sa base de données sont hébergées par Render Services, Inc. (render.com).
       Les emails sont envoyés par Brevo (brevo.com).</p>
     <h2>Propriété intellectuelle</h2>
-    <p>Le logiciel MenuFlash Mini, sa marque et son interface appartiennent à l'éditeur. Les menus, photos, logos et
+    <p>Le logiciel MenuFlash, sa marque et son interface appartiennent à l'éditeur. Les menus, photos, logos et
       textes publiés par chaque restaurant restent la propriété de ce restaurant, qui en est seul responsable.</p>
 
   {% elif page == 'privacy' %}
     <h2>Qui est responsable de vos données ?</h2>
     <p><strong>Si vous êtes client d'un restaurant</strong> (vous commandez depuis un menu), le restaurant chez qui
-      vous commandez est responsable de vos données. MenuFlash Mini les traite pour son compte, uniquement pour
+      vous commandez est responsable de vos données. MenuFlash les traite pour son compte, uniquement pour
       faire fonctionner la commande.<br>
       <strong>Si vous êtes restaurateur</strong>, {{ legal.operator }} est responsable des données de votre compte.</p>
 
@@ -96,7 +96,7 @@
 
   {% else %}
     <h2>1. Objet</h2>
-    <p>MenuFlash Mini est un service en ligne qui permet à un restaurant de publier son menu par QR code, de recevoir
+    <p>MenuFlash est un service en ligne qui permet à un restaurant de publier son menu par QR code, de recevoir
       des commandes sur place et à emporter, et de les gérer en cuisine. Ces conditions s'appliquent à tout restaurant
       qui crée un compte (le « Client ») et à son équipe.</p>
 
@@ -115,7 +115,7 @@
       activité. Il garantit disposer des droits sur les photos et logos publiés.</p>
 
     <h2>5. Commandes et données des clients</h2>
-    <p>Le contrat de vente du repas est conclu entre le restaurant et son client ; MenuFlash Mini n'en est pas partie.
+    <p>Le contrat de vente du repas est conclu entre le restaurant et son client ; MenuFlash n'en est pas partie.
       Le paiement des repas se fait au restaurant. Le Client utilise les coordonnées de ses clients uniquement pour
       traiter leurs commandes, conformément à la <a href="{{ url_for('legal_privacy') }}">politique de confidentialité</a>.</p>
 

@@ -1,0 +1,24 @@
+Chronomètre des requêtes (MenuFlash)
+
+INSTALLATION
+1. Décompressez ce zip dans le dossier du projet (là où se trouve app.py).
+2. Dans PowerShell, dans ce dossier :   python ajouter_perf_watch.py
+   (sans danger : relancé, il répond « Déjà branché »)
+3. git add perf_watch.py ajouter_perf_watch.py app.py
+   git status        <- perf_watch.py doit apparaître comme NOUVEAU fichier, sinon Render plantera
+   git commit -m "Chronomètre des requêtes + connexions PostgreSQL renforcées"
+   git push
+
+UTILISATION (après le déploiement : statut Live)
+- Connectez-vous. Render > Logs > cherchez  CONNEXION  : une ligne détaille le temps de la connexion.
+- Si une page est lente : cherchez  LENTE  dans les Logs (seuil : 0,8 s).
+- Chrome : F12 > Network > cliquer la requête > Timing > section « Server Timing »
+  (affichée seulement pour un utilisateur connecté).
+
+RÉGLAGES facultatifs (Render > Environment)
+  SLOW_REQUEST_MS=800   seuil d'une requête lente (100 à 60000)
+  PERF_LOG_LOGIN=false  ne plus journaliser chaque connexion
+  PERF_SERVER_TIMING=false   ne plus envoyer l'en-tête Server-Timing
+  PERF_WATCH=false      tout désactiver
+
+Aucun email, mot de passe ni jeton n'est écrit dans les journaux.

@@ -1,0 +1,56 @@
+Accès aux commandes (MenuFlash) : une adresse modifiée ramène toujours le client sur sa page, sans message
+
+CE QUI CHANGE POUR LE CLIENT
+- Il est sur /m/chez-awa/commande/87 et remplace 87 par 88 (ou par n'importe quoi) : il reste sur SA page de commande.
+  Plus de « Not Found », et aucun message.
+- S'il était sur le menu, il revient au menu (avec sa table s'il a scanné un QR). Sur un téléphone inconnu (aucun cookie) :
+  menu du restaurant, sans table.
+- Cela vaut pour toutes les adresses de commande : page de suivi, état, lignes, modifier, annuler, ajouter des plats, avis,
+  adresses mal écrites (lettres, slash final, sous-page inconnue), mauvaise méthode (adresse /annuler-client tapée dans la barre).
+- Le paramètre ?ajouter=<numéro> du menu est retiré de l'adresse, en silence, s'il ne désigne pas une de ses commandes.
+
+SÉCURITÉ
+- Une commande qui n'existe pas, une commande d'un autre client et une commande d'un autre restaurant donnent EXACTEMENT la même
+  réponse (destination, en-têtes, taille) : plus aucun moyen de deviner quels numéros existent. (Mes tests ont trouvé une différence
+  d'en-tête « Vary » avant correction ; elle est corrigée et testée.)
+- Aucune modification n'est possible sur la commande d'un autre (annuler, ajouter, modifier, avis), y compris par un script.
+- Ce qui reste autorisé : ses propres commandes, le lien de suivi reçu par email (commande à emporter, ?k=), l'équipe du restaurant (lecture).
+- « La page où il se trouve » est retenue par le serveur (cookie signé « mf_here », 12 h), jamais lue dans l'adresse. Une page de
+  commande qui n'est pas la sienne n'est jamais retenue.
+- Les appels du navigateur (JSON) ne peuvent pas être redirigés : ils reçoivent {"ok": false, "redirect": "/..."} (code 404, aucun texte)
+  et static/order_edit.js suit ce redirect en silence.
+- Tentatives tracées (journal de sécurité, « order_access_denied », 3 lignes au plus par IP et par 10 minutes, sans donnée personnelle).
+
+CORRECTION DANS CE PAQUET : TABLES NOMMÉES PAR DES CHIFFRES
+Dans la version précédente des QR sécurisés, une table nommée « 1 » ou « 2 » donnait, dans le lien destiné au client (« Retour au menu »,
+« Ajouter d'autres plats »), le lien d'une AUTRE table AVEC son code secret. Corrigé dans qr_security.py (ce zip) : un nom de table
+n'est jamais pris pour un numéro interne. Si vous nommez vos tables « 1 », « 2 », « 3 », installez ce correctif.
+
+CE QUI NE CHANGE PAS
+- Une adresse /m/xxx d'un restaurant qui n'existe pas reste « introuvable » (ce n'est pas une commande).
+- Les messages de la sécurité des QR (« vous restez à Table 1 ») restent : ils expliquent le cas d'un client qui a scanné son QR
+  sans accepter les cookies (il se retrouverait au menu général sans comprendre). Pour les supprimer aussi, dites-le-moi.
+- Un client qui revient plus de 48 h après, avec l'ancien lien de suivi d'une commande de table (sans cookie), arrive au menu.
+
+INSTALLATION
+1. Décompressez ce zip dans le dossier du projet (là où se trouve app.py), en acceptant de remplacer static/order_edit.js et
+   qr_security.py. (qr_security.py : seulement si vous avez installé « QR sécurisés » ; sinon supprimez ce fichier du dossier.)
+2. Dans PowerShell, dans ce dossier :   python ajouter_acces_commandes.py
+   Il fait 3 retouches précises (app.py, templates/base.html, qr_security.py), crée une copie <fichier>.avant_acces_commandes,
+   et peut être relancé sans danger.
+3. git add order_access.py ajouter_acces_commandes.py qr_security.py static/order_edit.js app.py templates/base.html
+   git status      <- order_access.py doit apparaître comme NOUVEAU fichier (sinon Render plante au démarrage)
+   git commit -m "Accès aux commandes : une adresse modifiée ramène le client sur sa page"
+   git push
+4. Après le déploiement : Ctrl + F5 (le script order_edit.js passe en version 3).
+
+TEST EN LOCAL (python app.py), 5 minutes
+1. Passez une commande, ouvrez sa page de suivi : /m/<restaurant>/commande/<n>.
+2. Dans la barre d'adresse, remplacez <n> par <n+1>, puis par 99999, puis par abc : à chaque fois vous restez sur votre page, sans message.
+3. Cliquez « Retour au menu », puis tapez /m/<restaurant>/commande/99999 : vous revenez au menu.
+4. Ouvrez /m/<restaurant>/commande/<n>/annuler-client dans la barre d'adresse : vous revenez à votre page, la commande n'est pas annulée.
+5. Fenêtre privée (aucun cookie) : ouvrez /m/<restaurant>/commande/<n> : menu du restaurant.
+
+POUR ANNULER
+Copiez les fichiers .avant_acces_commandes par-dessus les originaux (app.py, templates/base.html, qr_security.py), supprimez order_access.py,
+puis git push.

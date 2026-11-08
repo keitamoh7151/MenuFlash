@@ -878,7 +878,7 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
         c.rect(0, h - 28 * mm, w, 28 * mm, fill=1, stroke=0)
         c.setFillColor(HexColor("#FFFFFF"))
         c.setFont("Helvetica-Bold", 16)
-        c.drawString(14 * mm, h - 16 * mm, "MenuFlash Mini")
+        c.drawString(14 * mm, h - 16 * mm, "MenuFlash")
         c.setFont("Helvetica", 10)
         c.drawString(14 * mm, h - 22 * mm, "Reçu de paiement d'abonnement")
         c.setFillColor(HexColor("#1A1D23"))
@@ -909,7 +909,7 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
         c.drawRightString(w - 14 * mm, y - 4 * mm, f"{_fmt(p.amount)} FCFA")
         c.setFillColor(HexColor("#6B6A66"))
         c.setFont("Helvetica", 8)
-        c.drawCentredString(w / 2, 10 * mm, "Merci pour votre confiance. — MenuFlash Mini")
+        c.drawCentredString(w / 2, 10 * mm, "Merci pour votre confiance. — MenuFlash")
         c.showPage()
         c.save()
         buf.seek(0)
@@ -1027,8 +1027,8 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
             from mailer import send_transactional_email
             send_transactional_email(
                 app, o.email,
-                subject=("Votre abonnement MenuFlash Mini a expiré" if expired
-                         else "Votre abonnement MenuFlash Mini arrive à échéance"),
+                subject=("Votre abonnement MenuFlash a expiré" if expired
+                         else "Votre abonnement MenuFlash arrive à échéance"),
                 body_text=(
                     f"Bonjour,\n\nL'abonnement de « {r.name} » "
                     + (f"a expiré le {r.subscription_active_until:%d/%m/%Y}. Votre menu n'est plus "
@@ -1036,7 +1036,7 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
                        f"expire le {r.subscription_active_until:%d/%m/%Y}.")
                     + f"\n\nPour renouveler ({_fmt(price)} FCFA / mois), réglez par Wave, Orange Money "
                       f"ou Moov Money et envoyez-nous la référence de la transaction.\n\n"
-                      f"Merci pour votre confiance,\nL'équipe MenuFlash Mini"),
+                      f"Merci pour votre confiance,\nL'équipe MenuFlash"),
             )
             sent += 1
         return sent

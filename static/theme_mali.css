@@ -1,0 +1,287 @@
+/* ==========================================================================
+   MenuFlash — thème « Bogolan » du back-office (même identité que la page d'accueil)
+   Brun terre d'ombre, crème, ocre. S'applique à : connexion, inscription, tableau de bord du restaurant,
+   panel super-admin, pages légales. NE S'APPLIQUE PAS aux pages client (/m/…) : le menu, la page de suivi
+   et la page « menu indisponible » gardent l'identité du restaurant (son logo, ses couleurs).
+   Activé par la classe « mf-mali » sur <body> (voir base.html). Pour revenir en arrière : retirer cette classe.
+   ========================================================================== */
+
+body.mf-mali {
+  --mali-umber: #2B1E15;
+  --mali-umber-2: #3A2A1E;
+  --mali-brown: #351B12;          /* brun du logo et de l'en-tête */
+  --mali-cream: #F3E7CF;
+  --mali-paper: #FBF7EF;
+  --mali-ochre: #D98E1F;
+  --mali-ochre-dark: #A8650C;
+  --mali-flash: #FFA500;          /* orange du liseré du logo */
+  --mali-clay: #9C4A26;
+  --mali-millet: #2F6B45;
+  --mali-line: #E6D9C2;
+  --mali-soft: #6F604F;
+  --mali-display: "Bricolage Grotesque", "Inter", system-ui, sans-serif;
+  --mali-body: "Instrument Sans", "Inter", system-ui, sans-serif;
+  --mali-bogolan: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='none' stroke='%23F3E7CF' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M0 18 L10 8 L20 18 L30 8 L40 18 L50 8 L60 18 L70 8 L80 18 L90 8 L100 18 L110 8 L120 18'/%3E%3Cpath d='M60 46 L82 70 L60 94 L38 70 Z'/%3E%3Cpath d='M60 58 L71 70 L60 82 L49 70 Z'/%3E%3Cpath d='M12 58 V82 M0 70 H24 M108 58 V82 M96 70 H120'/%3E%3Cpath d='M0 108 H120' stroke-dasharray='6 8'/%3E%3C/g%3E%3Cg fill='%23F3E7CF'%3E%3Ccircle cx='15' cy='33' r='2.6'/%3E%3Ccircle cx='35' cy='33' r='2.6'/%3E%3Ccircle cx='55' cy='33' r='2.6'/%3E%3Ccircle cx='75' cy='33' r='2.6'/%3E%3Ccircle cx='95' cy='33' r='2.6'/%3E%3Ccircle cx='115' cy='33' r='2.6'/%3E%3Ccircle cx='60' cy='70' r='3.2'/%3E%3C/g%3E%3C/svg%3E");
+
+  /* variables de l'application */
+  --mf-ink: var(--mali-umber);
+  --mf-ink-soft: var(--mali-soft);
+  --mf-bg: var(--mali-paper);
+  --mf-border: var(--mali-line);
+  --mf-accent: var(--mali-ochre);          /* la marque MenuFlash ne change pas avec la couleur choisie par le restaurant */
+  --mf-accent-dark: var(--mali-ochre-dark);
+  --mf-accent-light: #F8E6C4;
+  --mf-success: var(--mali-millet);
+  --mf-success-bg: #E1EFE5;
+  --mf-warning: #8A6100;
+  --mf-warning-bg: #F8EBC8;
+  --mf-danger: #B23A2E;
+  --mf-danger-bg: #F7DFDA;
+
+  /* variables Bootstrap */
+  --bs-font-sans-serif: var(--mali-body);
+  --bs-body-font-family: var(--mali-body);
+  --bs-body-color: var(--mali-umber);
+  --bs-body-color-rgb: 43, 30, 21;
+  --bs-body-bg: var(--mali-paper);
+  --bs-secondary-color: var(--mali-soft);
+  --bs-secondary-rgb: 111, 96, 79;
+  --bs-border-color: var(--mali-line);
+  --bs-primary: var(--mali-ochre);
+  --bs-primary-rgb: 217, 142, 31;
+  --bs-link-color: var(--mali-ochre-dark);
+  --bs-link-color-rgb: 168, 101, 12;
+  --bs-link-hover-color: var(--mali-umber);
+  --bs-border-radius: 12px;
+  --bs-border-radius-lg: 18px;
+  --bs-border-radius-sm: 9px;
+
+  font-family: var(--mali-body);
+  background: var(--mali-paper);
+  color: var(--mali-umber);
+  -webkit-font-smoothing: antialiased;
+}
+html:has(body.mf-mali) { background: var(--mali-paper); }
+body.mf-mali ::selection { background: rgba(217,142,31,.35); }
+
+/* ---------- Titres ---------- */
+body.mf-mali h1, body.mf-mali h2, body.mf-mali h3, body.mf-mali h4,
+body.mf-mali .fw-brand, body.mf-mali .mf-stat-num {
+  font-family: var(--mali-display);
+  font-weight: 800;
+  letter-spacing: -.02em;
+  color: var(--mali-umber);
+}
+body.mf-mali h5, body.mf-mali h6 { font-family: var(--mali-display); font-weight: 700; letter-spacing: -.01em; }
+body.mf-mali .mf-stat-num { font-size: 1.9rem; }
+body.mf-mali .text-secondary { color: var(--mali-soft) !important; }
+body.mf-mali :focus-visible { outline: 3px solid var(--mali-ochre); outline-offset: 2px; border-radius: 8px; }
+
+/* ---------- Barre de navigation (brun du logo + liseré orangé) ---------- */
+body.mf-mali .mf-navbar {
+  background: var(--mali-brown);
+  border-bottom: 0;
+  box-shadow: 0 10px 30px rgba(20,10,5,.28);
+  padding-top: .55rem; padding-bottom: .55rem;
+}
+body.mf-mali .mf-navbar::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; pointer-events: none;
+  background: linear-gradient(90deg, rgba(255,165,0,0) 0%, #FFA500 20%, #FFBA33 50%, #FFA500 80%, rgba(255,165,0,0) 100%);
+}
+body.mf-mali .mf-navbar .navbar-brand {
+  font-family: var(--mali-display); font-weight: 800; letter-spacing: -.02em;
+  color: var(--mali-cream); font-size: 1.2rem;
+}
+body.mf-mali .mf-navbar .navbar-brand i { color: var(--mali-flash); }
+body.mf-mali .mf-navbar-logo { box-shadow: 0 0 0 2px rgba(255,165,0,.55); border-radius: 10px; }
+body.mf-mali .mf-navbar-logo-placeholder { background: rgba(255,165,0,.18); color: var(--mali-flash); border-radius: 10px; }
+body.mf-mali .mf-navbar .text-secondary { color: rgba(243,231,207,.65) !important; }
+body.mf-mali .mf-navbar .btn-outline-secondary {
+  color: var(--mali-cream); border-color: rgba(243,231,207,.32); background: transparent;
+}
+body.mf-mali .mf-navbar .btn-outline-secondary:hover,
+body.mf-mali .mf-navbar .btn-outline-secondary.show,
+body.mf-mali .mf-navbar .btn-outline-secondary:focus {
+  background: rgba(243,231,207,.1); color: #fff; border-color: rgba(243,231,207,.6);
+}
+body.mf-mali .mf-navbar .btn-primary {
+  background: linear-gradient(180deg, #FFBA33 0%, #FFA500 100%); border-color: transparent;
+  color: var(--mali-brown); box-shadow: 0 4px 14px rgba(255,165,0,.3);
+}
+body.mf-mali .mf-navbar .btn-link.text-secondary { color: rgba(243,231,207,.7) !important; }
+body.mf-mali .mf-navbar .dropdown-menu-dark {
+  --bs-dropdown-bg: var(--mali-umber);
+  --bs-dropdown-border-color: rgba(243,231,207,.14);
+  --bs-dropdown-link-hover-bg: rgba(255,165,0,.18);
+  --bs-dropdown-link-active-bg: var(--mali-ochre);
+  --bs-dropdown-link-color: var(--mali-cream);
+  --bs-dropdown-divider-bg: rgba(243,231,207,.14);
+  border-radius: 14px; box-shadow: 0 18px 40px rgba(20,10,5,.4);
+}
+body.mf-mali .mf-navbar .dropdown-item { color: var(--mali-cream); }
+body.mf-mali .mf-navbar .dropdown-item:hover, body.mf-mali .mf-navbar .dropdown-item:focus { color: #fff; }
+body.mf-mali .mf-navbar .dropdown-item i { color: var(--mali-flash); }
+body.mf-mali .mf-navbar .navbar-toggler { border-color: rgba(243,231,207,.35); }
+body.mf-mali .mf-sa-pill { background: rgba(255,165,0,.22); color: #FFD27A; }
+body.mf-mali .mf-brand-logo-nav { height: 42px; }
+@media (max-width: 575.98px) { body.mf-mali .mf-brand-logo-nav { height: 34px; } }
+
+/* ---------- Boutons ---------- */
+body.mf-mali .btn { --bs-btn-border-radius: 999px; font-family: var(--mali-body); font-weight: 700; }
+body.mf-mali .btn-primary {
+  --bs-btn-color: #1E140C; --bs-btn-hover-color: #1E140C; --bs-btn-active-color: #1E140C; --bs-btn-disabled-color: #1E140C;
+  --bs-btn-bg: var(--mali-ochre); --bs-btn-border-color: var(--mali-ochre);
+  --bs-btn-hover-bg: #E9A23A; --bs-btn-hover-border-color: #E9A23A;
+  --bs-btn-active-bg: #E9A23A; --bs-btn-active-border-color: #E9A23A;
+  --bs-btn-disabled-bg: var(--mali-ochre); --bs-btn-disabled-border-color: var(--mali-ochre);
+  --bs-btn-focus-shadow-rgb: 217, 142, 31;
+}
+body.mf-mali .btn-outline-secondary {
+  --bs-btn-color: var(--mali-umber); --bs-btn-border-color: #D9C9AA;
+  --bs-btn-hover-color: var(--mali-umber); --bs-btn-hover-bg: var(--mali-cream); --bs-btn-hover-border-color: #CDB98F;
+  --bs-btn-active-color: var(--mali-umber); --bs-btn-active-bg: var(--mali-cream); --bs-btn-active-border-color: #CDB98F;
+}
+body.mf-mali .btn-outline-primary {
+  --bs-btn-color: var(--mali-ochre-dark); --bs-btn-border-color: var(--mali-ochre);
+  --bs-btn-hover-color: #1E140C; --bs-btn-hover-bg: var(--mali-ochre); --bs-btn-hover-border-color: var(--mali-ochre);
+  --bs-btn-active-color: #1E140C; --bs-btn-active-bg: var(--mali-ochre); --bs-btn-active-border-color: var(--mali-ochre);
+}
+body.mf-mali .btn-dark { --bs-btn-bg: var(--mali-umber); --bs-btn-border-color: var(--mali-umber); --bs-btn-hover-bg: var(--mali-umber-2); --bs-btn-hover-border-color: var(--mali-umber-2); }
+body.mf-mali .btn-outline-dark { --bs-btn-color: var(--mali-umber); --bs-btn-border-color: var(--mali-umber); --bs-btn-hover-bg: var(--mali-umber); --bs-btn-hover-border-color: var(--mali-umber); }
+body.mf-mali .btn-outline-light { --bs-btn-border-color: rgba(243,231,207,.5); --bs-btn-color: var(--mali-cream); --bs-btn-hover-bg: rgba(243,231,207,.12); --bs-btn-hover-border-color: var(--mali-cream); --bs-btn-hover-color: #fff; }
+body.mf-mali .btn-sm { --bs-btn-border-radius: 999px; }
+/* boutons carrés ou ronds qui doivent le rester (icônes, quantités, poignées) */
+body.mf-mali .mf-qty-group .btn { border-radius: 50%; }
+body.mf-mali .btn-group > .btn, body.mf-mali .input-group > .btn { --bs-btn-border-radius: var(--bs-border-radius); }
+body.mf-mali .btn-group > .btn:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+body.mf-mali .btn-group > .btn:not(:first-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+body.mf-mali .badge.text-bg-primary { color: #1E140C !important; }
+
+/* ---------- Cartes ---------- */
+body.mf-mali .card {
+  --bs-card-border-color: var(--mali-line);
+  --bs-card-border-radius: 18px; --bs-card-inner-border-radius: 17px;
+  --bs-card-cap-bg: var(--mali-paper);
+}
+body.mf-mali .mf-section-card, body.mf-mali .mf-stat-card, body.mf-mali .mf-order-card-k {
+  border: 1px solid var(--mali-line); border-radius: 18px;
+  box-shadow: 0 2px 14px rgba(43,30,21,.06);
+}
+body.mf-mali a.mf-stat-card:hover, body.mf-mali .hover-lift:hover { box-shadow: 0 12px 26px rgba(43,30,21,.12); }
+body.mf-mali .mf-kanban-col { background: #F4EBDA; border-radius: 18px; }
+body.mf-mali .mf-qr-card, body.mf-mali .mf-sa-soft, body.mf-mali .mf-sa-note, body.mf-mali .mf-sa-error { background: #F6EEDD; }
+/* petit losange bogolan devant les titres de section (au lieu de la barre) */
+body.mf-mali .mf-section-title::before {
+  width: 9px; height: 9px; border-radius: 2px; background: var(--mali-ochre);
+  transform: rotate(45deg); box-shadow: 0 0 0 3px rgba(217,142,31,.22); margin-right: 4px;
+}
+
+/* ---------- Tableaux ---------- */
+body.mf-mali .table { --bs-table-border-color: var(--mali-line); --bs-table-hover-bg: rgba(243,231,207,.35); color: var(--mali-umber); }
+body.mf-mali .table > thead th { color: var(--mali-soft); border-bottom-color: #D9C9AA; }
+
+/* ---------- Formulaires ---------- */
+body.mf-mali .form-label { font-weight: 600; }
+body.mf-mali .form-control, body.mf-mali .form-select {
+  border-color: #DCCBAA; background-color: #fff; border-radius: 12px; color: var(--mali-umber);
+}
+body.mf-mali .form-control:focus, body.mf-mali .form-select:focus {
+  border-color: var(--mali-ochre); box-shadow: 0 0 0 .25rem rgba(217,142,31,.22); outline: 0;
+}
+body.mf-mali .form-control::placeholder { color: #A99C88; }
+body.mf-mali .input-group-text { background: #F6EEDD; border-color: #DCCBAA; color: var(--mali-soft); }
+body.mf-mali .form-check-input { border-color: #C9B68F; }
+body.mf-mali .form-check-input:checked { background-color: var(--mali-ochre); border-color: var(--mali-ochre); }
+body.mf-mali .form-check-input:focus { border-color: var(--mali-ochre); box-shadow: 0 0 0 .25rem rgba(217,142,31,.22); }
+body.mf-mali .form-text { color: var(--mali-soft); }
+
+/* ---------- Divers composants ---------- */
+body.mf-mali .modal-content { border: 0; border-radius: 22px; box-shadow: 0 30px 70px rgba(20,10,5,.35); }
+body.mf-mali .nav-pills .nav-link.active, body.mf-mali .nav-tabs .nav-link.active { color: #1E140C; }
+body.mf-mali .nav-pills { --bs-nav-pills-link-active-bg: var(--mali-ochre); --bs-nav-pills-link-active-color: #1E140C; }
+body.mf-mali .progress { --bs-progress-bg: #EADFC6; --bs-progress-bar-bg: var(--mali-ochre); border-radius: 999px; }
+body.mf-mali .dropdown-menu { border-radius: 14px; border-color: var(--mali-line); }
+body.mf-mali .list-group { --bs-list-group-border-color: var(--mali-line); }
+body.mf-mali .mf-security-banner { background: var(--mali-cream); color: #6B4A00; border-bottom: 1px solid #E2CF9F; }
+body.mf-mali .mf-live-indicator { border-radius: 999px; }
+body.mf-mali .mf-pill-toggle { border-radius: 999px; }
+body.mf-mali .mf-scan-badge, body.mf-mali .mf-kanban-count { border-radius: 999px; }
+body.mf-mali .mf-drag-handle { color: #B8A98E; }
+body.mf-mali .sortable-chosen { background: #F8E6C4 !important; }
+body.mf-mali .alert { border-radius: 14px; }
+body.mf-mali hr { border-color: var(--mali-line); opacity: 1; }
+
+/* ---------- Pages d'accès (connexion, mot de passe, 2FA, invitations, maintenance…) ---------- */
+body.mf-mali .mf-auth-bg {
+  background-color: var(--mali-umber);
+  background-image: linear-gradient(rgba(43,30,21,.9), rgba(43,30,21,.9)), var(--mali-bogolan);
+  background-size: auto, 96px 96px;
+  background-attachment: fixed;
+  position: relative;
+}
+body.mf-mali .mf-auth-card {
+  position: relative; overflow: hidden; padding: 0 !important;
+  max-width: 420px;
+  background: var(--mali-paper); border: 1px solid rgba(243,231,207,.18); border-radius: 26px;
+  box-shadow: 0 30px 80px rgba(10,5,2,.55);
+}
+/* en-tête de carte : le logo sur son brun, avec le liseré orangé du logo */
+body.mf-mali .mf-auth-card::before {
+  content: ""; display: block; height: 96px; flex: none;
+  background: var(--mali-brown) url("brand/menuflash-logo-sombre.svg") center / auto 72px no-repeat;
+  border-bottom: 3px solid var(--mali-flash);
+}
+/* le logo déjà présent dans la page de connexion reste pour les lecteurs d'écran, mais n'est plus dessiné deux fois */
+body.mf-mali .mf-auth-card .mf-brand-plate {
+  position: absolute !important; width: 1px; height: 1px; padding: 0 !important; margin: -1px !important;
+  overflow: hidden; clip: rect(0 0 0 0); border: 0 !important; white-space: nowrap;
+}
+body.mf-mali .mf-auth-card .card-body { padding: 1.75rem 1.75rem 1.5rem !important; }
+body.mf-mali .mf-auth-card .card-body > .text-center:first-child:has(.mf-brand-plate) { margin: 0 !important; }
+body.mf-mali .mf-auth-card .bi[style*="font-size: 1.8rem"] { color: var(--mali-ochre) !important; }
+body.mf-mali .mf-auth-card h1 { font-size: 1.45rem; }
+
+/* ---------- Inscription (barre du haut + fond) ---------- */
+body.mf-mali .mf-landing-nav {
+  background: var(--mali-brown) !important; position: sticky; top: 0; z-index: 50;
+  box-shadow: 0 10px 30px rgba(20,10,5,.28);
+}
+body.mf-mali .mf-landing-nav::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: linear-gradient(90deg, rgba(255,165,0,0) 0%, #FFA500 20%, #FFBA33 50%, #FFA500 80%, rgba(255,165,0,0) 100%);
+}
+body.mf-mali .mf-landing-nav .container { min-height: 72px; }
+body.mf-mali .mf-landing-nav .mf-brand-logo-nav { height: 52px; }
+body.mf-mali .mf-landing-nav .btn-outline-light { color: var(--mali-cream); border-color: rgba(243,231,207,.45); }
+body.mf-mali .mf-landing-nav .btn-outline-light:hover { background: rgba(243,231,207,.1); border-color: var(--mali-cream); color: #fff; }
+body.mf-mali .mf-signup-wrap {
+  background-color: var(--mali-umber);
+  background-image: linear-gradient(rgba(43,30,21,.9), rgba(43,30,21,.9)), var(--mali-bogolan);
+  background-size: auto, 96px 96px;
+}
+body.mf-mali .mf-signup-card {
+  background: var(--mali-paper); border: 1px solid rgba(243,231,207,.18); border-radius: 26px;
+  box-shadow: 0 30px 80px rgba(10,5,2,.5);
+}
+body.mf-mali .mf-signup-url-prefix { background: #F6EEDD; }
+
+/* ---------- Pied de page (pages connectées) ---------- */
+.mf-mali-footer {
+  margin-top: 3rem; background: var(--mali-brown, #351B12); color: #F3E7CF; position: relative;
+  padding: 26px 0 22px; font-size: .9rem;
+}
+.mf-mali-footer::before {      /* frise bogolan : zigzag ocre */
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 12px;
+  background: #2B1E15 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='12' viewBox='0 0 20 12'%3E%3Cpath d='M0 9 L5 3 L10 9 L15 3 L20 9' fill='none' stroke='%23D98E1F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") repeat-x center / 20px 12px;
+}
+.mf-mali-footer-inner {
+  max-width: 1160px; margin: 0 auto; padding: 8px 20px 0;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px;
+}
+.mf-mali-footer-logo { display: block; height: 44px; width: auto; max-width: 100%; object-fit: contain; }
+.mf-mali-footer-links { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.mf-mali-footer a { color: rgba(243,231,207,.8) !important; text-decoration: none; }
+.mf-mali-footer a:hover { color: #fff !important; text-decoration: underline; }
+.mf-mali-flag { display: inline-flex; vertical-align: middle; margin-left: 6px; border-radius: 2px; overflow: hidden; }
+.mf-mali-flag span { width: 7px; height: 12px; display: block; }
+body:has(.mf-auth-bg) .mf-mali-footer { display: none; }

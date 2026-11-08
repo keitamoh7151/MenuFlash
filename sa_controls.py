@@ -119,27 +119,27 @@ def init_sa_controls(app, *, super_admin_required, log_audit):
     # ------------------------------------------------------------------
     MESSAGES = {
         "suspend": ("Votre compte {name} est suspendu",
-                    "Bonjour,\n\nLe compte de « {name} » sur MenuFlash Mini a été suspendu.\n"
+                    "Bonjour,\n\nLe compte de « {name} » sur MenuFlash a été suspendu.\n"
                     "Motif : {reason}\n\nVotre menu n'est plus visible par vos clients et votre "
-                    "tableau de bord est bloqué.\nContactez l'équipe MenuFlash Mini pour régulariser "
+                    "tableau de bord est bloqué.\nContactez l'équipe MenuFlash pour régulariser "
                     "la situation.\n"),
         "reactivate": ("Votre compte {name} est réactivé",
-                       "Bonjour,\n\nBonne nouvelle : le compte de « {name} » sur MenuFlash Mini est "
+                       "Bonjour,\n\nBonne nouvelle : le compte de « {name} » sur MenuFlash est "
                        "de nouveau actif.\nVotre menu est visible et vos clients peuvent commander.\n"),
         "block_orders": ("Commandes en ligne bloquées pour {name}",
                          "Bonjour,\n\nLes commandes en ligne de « {name} » sont temporairement bloquées.\n"
                          "Motif : {reason}\n\nVotre menu reste visible en consultation.\n"
-                         "Contactez l'équipe MenuFlash Mini pour les réactiver.\n"),
+                         "Contactez l'équipe MenuFlash pour les réactiver.\n"),
         "unblock_orders": ("Commandes en ligne réactivées pour {name}",
                            "Bonjour,\n\nLes commandes en ligne de « {name} » sont de nouveau ouvertes.\n"),
         "read_only_on": ("Compte {name} en lecture seule",
                          "Bonjour,\n\nLe tableau de bord de « {name} » passe en lecture seule.\n"
                          "Motif : {reason}\n\nVos clients peuvent toujours commander et votre équipe "
                          "traite les commandes normalement, mais les modifications (menu, équipe, "
-                         "réglages) sont bloquées.\nContactez l'équipe MenuFlash Mini pour régulariser.\n"),
+                         "réglages) sont bloquées.\nContactez l'équipe MenuFlash pour régulariser.\n"),
         "read_only_off": ("Compte {name} : modifications réactivées",
                           "Bonjour,\n\nVous pouvez de nouveau modifier votre menu et vos réglages sur "
-                          "MenuFlash Mini pour « {name} ».\n"),
+                          "MenuFlash pour « {name} ».\n"),
     }
 
     def notify(restaurant, kind, reason=None):
@@ -366,7 +366,7 @@ def init_sa_controls(app, *, super_admin_required, log_audit):
                             body = "Votre compte est limité : " + " et ".join(parts) + "."
                             if c.reason:
                                 body += f" Motif : {c.reason}."
-                            body += " Contactez l'équipe MenuFlash Mini."
+                            body += " Contactez l'équipe MenuFlash."
                             stamp = int(c.updated_at.timestamp()) if c.updated_at else 0
                             banner = SimpleNamespace(id=f"ctrl-{c.restaurant_id}-{stamp}", level="warning",
                                                      title="Compte limité", body=body)
@@ -406,7 +406,7 @@ def init_sa_controls(app, *, super_admin_required, log_audit):
             c = control_for(_active_restaurant_id())
             if c and c.read_only:
                 msg = "Votre compte est en lecture seule : les modifications sont bloquées. " \
-                      "Contactez l'équipe MenuFlash Mini."
+                      "Contactez l'équipe MenuFlash."
                 if _wants_json():
                     return jsonify(ok=False, error=msg), 403
                 flash(msg, "error")
