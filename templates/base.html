@@ -24,6 +24,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='phone_field.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='takeaway.css') }}?v=3">
   <link rel="stylesheet" href="{{ url_for('static', filename='theme_mali.css') }}?v=1">
+  {% if request.path.startswith('/m/') %}<link rel="stylesheet" href="{{ url_for('static', filename='theme_mali_client.css') }}?v=1">{% endif %}
   <style>
     :root {
       --mf-accent: {{ theme_colors.accent }};
@@ -34,7 +35,7 @@
   {% block theme_override %}{% endblock %}
   {% block extra_head %}{% endblock %}
 </head>
-<body class="{{ body_class|default('') }}{{ ' mf-mali' if not request.path.startswith('/m/') }}">
+<body class="{{ body_class|default('') }} mf-mali{{ ' mf-client' if request.path.startswith('/m/') }}">
   {% if current_user.is_authenticated and not current_user.is_super_admin and request.endpoint == 'admin_orders' %}
     <div id="theme-sync-root" data-stream-url="{{ url_for('admin_orders_stream') }}" class="visually-hidden"></div>
   {% endif %}
