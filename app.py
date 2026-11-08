@@ -2123,6 +2123,10 @@ from qr_security import init_qr_security
 init_qr_security(app, owner_required=owner_required, active_restaurant=active_restaurant,
                  log_audit=log_audit)
 
+# --- Accès aux commandes : une adresse modifiée ramène le client sur sa page, sans message (order_access.py) ---
+from order_access import init_order_access
+init_order_access(app, log_audit=log_audit)
+
 from hardening import init_hardening
 init_hardening(app, log_audit=log_audit)
 

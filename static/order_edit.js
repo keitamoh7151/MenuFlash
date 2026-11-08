@@ -99,7 +99,16 @@
       opts.headers["Content-Type"] = "application/x-www-form-urlencoded";
     }
     return fetch(url, opts).then(function (r) {
-      return r.json().catch(function () { return {}; }).then(function (d) { d.__status = r.status; return d; });
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        d.__status = r.status;
+        // Cette commande n'est pas (ou plus) la sienne : le serveur indique la page où ramener le client.
+        // On y va sans rien afficher ; la promesse ne se termine pas pour qu'aucune erreur ne s'affiche.
+        if (d && typeof d.redirect === "string" && /^\/(?![\/\\])/.test(d.redirect)) {   // adresse du site seulement
+          window.location.replace(d.redirect);
+          return new Promise(function () {});
+        }
+        return d;
+      });
     });
   }
 
@@ -372,7 +381,7 @@
     var timer = setInterval(function () {
       var btn = findAddButton(id);
       if (btn) { clearInterval(timer); strip(); btn.click(); return; }
-      if (++tries > 40) { clearInterval(timer); strip(); flash(t("noAdd")); }     // 40 × 250 ms = 10 s
+      if (++tries > 40) { clearInterval(timer); strip(); }     // 40 × 250 ms = 10 s : on abandonne en silence
     }, 250);
   }
 
@@ -477,3 +486,5 @@
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 })();
+
+

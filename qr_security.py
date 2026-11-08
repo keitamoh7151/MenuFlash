@@ -347,17 +347,19 @@ def init_qr_security(app, *, owner_required, active_restaurant, log_audit):
     # ------------------------------------------------------------------ liens et PDF avec le code
     @app.url_defaults
     def _qr_links_carry_the_code(endpoint, values):
-        """url_for('public_menu', qr=<numéro>) devient le lien COMPLET du QR (nom-code) : c'est ce que
-        veulent le bouton « Copier » et les PDF/PNG du restaurateur, sans autre modification. Les liens
-        destinés au CLIENT passent le NOM (qr=qr_slug(<numéro>)) : une chaîne non numérique n'est pas touchée.
-        Le numéro vient toujours du serveur (base de données), jamais d'une saisie du client."""
+        """url_for('public_menu', qr=<numéro ENTIER>) devient le lien COMPLET du QR (nom-code) : c'est ce que
+        veulent le bouton « Copier » et les PDF/PNG du restaurateur, sans autre modification.
+        Les liens destinés au CLIENT passent le NOM (qr=qr_slug(<numéro>)), toujours une CHAÎNE, jamais
+        converti : un nom de table fait de chiffres (« 1 », « 2 ») resterait sinon pris pour un numéro et
+        donnerait le lien (et le code secret) d'une AUTRE table. Seuls les entiers venant du serveur
+        (base de données) sont convertis, jamais une saisie du client."""
         if endpoint != "public_menu" or "qr" not in values:
             return
         value = values["qr"]
         if isinstance(value, bool) or value is None:
             values.pop("qr", None)
             return
-        if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
+        if isinstance(value, int):
             restaurant = _restaurant_by_slug(values.get("slug") or (request.view_args or {}).get("slug")) \
                 if g else None
             proof = proof_for_qr(int(value), restaurant.id) if restaurant is not None else None
