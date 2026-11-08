@@ -2127,6 +2127,10 @@ init_qr_security(app, owner_required=owner_required, active_restaurant=active_re
 from order_access import init_order_access
 init_order_access(app, log_audit=log_audit)
 
+# --- Bouclier d'adresses : une adresse modifiée ramène sur une page valide, sans erreur (url_shield.py) ---
+from url_shield import init_url_shield
+init_url_shield(app, log_audit=log_audit)
+
 from hardening import init_hardening
 init_hardening(app, log_audit=log_audit)
 
