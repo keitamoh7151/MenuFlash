@@ -6,7 +6,7 @@
 <div class="container py-4" style="max-width: 1040px;">
   <div class="alert alert-light border small mb-4">
     <i class="bi bi-info-circle-fill me-1" style="color: var(--mf-accent);"></i>
-    Journal de sécurité global, tous restaurants confondus (connexions, verrouillages, changements de mot de passe, actions d'équipe et de super-admin). Les 300 derniers événements sont affichés.
+    Journal de sécurité global, tous restaurants confondus (connexions, verrouillages, changements de mot de passe, actions d'équipe et de super-admin). Affichage par pages de {{ pg.per_page }} événements, du plus récent au plus ancien.
   </div>
 
   <div class="card mf-section-card">
@@ -34,6 +34,7 @@
       {% endif %}
     </div>
   </div>
+  {% include "_pagination.html" %}
 </div>
 {% endblock %}
 

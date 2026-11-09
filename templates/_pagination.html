@@ -1,0 +1,50 @@
+{# Barre de pages (journaux). Reçoit « pg » : page, pages, total, per_page, start, end. #}
+{% if pg and pg.pages > 1 %}
+<style>
+  .mf-pager { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 18px; }
+  .mf-pager-count { font-size: .82rem; color: var(--mf-ink-soft); }
+  .mf-pager-list { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .mf-pager-list a, .mf-pager-list span.mf-pager-item {
+    display: inline-flex; align-items: center; justify-content: center; min-width: 40px; height: 40px; padding: 0 14px;
+    border-radius: 999px; border: 1px solid var(--mf-border); background: #fff; color: var(--mf-ink);
+    font-weight: 700; font-size: .9rem; text-decoration: none;
+  }
+  .mf-pager-list a:hover { background: var(--mf-accent-light); border-color: var(--mf-accent); color: var(--mf-ink); }
+  .mf-pager-list span.mf-pager-item.is-current { background: var(--mf-accent); border-color: var(--mf-accent); color: #1E140C; }
+  .mf-pager-list span.mf-pager-item.is-disabled { opacity: .4; pointer-events: none; }
+  .mf-pager-list span.mf-pager-item.is-gap { border: 0; background: transparent; min-width: 22px; padding: 0; color: var(--mf-ink-soft); }
+  .mf-pager-compact { font-weight: 700; font-size: .9rem; color: var(--mf-ink); padding: 0 6px; }
+</style>
+{% set p = pg.page %}{% set n = pg.pages %}
+<nav class="mf-pager" aria-label="Pages du journal">
+  <div class="mf-pager-count">{{ pg.start }}–{{ pg.end }} sur {{ pg.total }} événements</div>
+
+  {# Téléphone : Précédent · Page x / n · Suivant #}
+  <ul class="mf-pager-list d-flex d-sm-none">
+    <li>{% if p > 1 %}<a href="{{ url_for(request.endpoint, page=p-1) }}" rel="prev" aria-label="Page précédente"><i class="bi bi-chevron-left"></i></a>
+        {% else %}<span class="mf-pager-item is-disabled"><i class="bi bi-chevron-left"></i></span>{% endif %}</li>
+    <li class="mf-pager-compact">Page {{ p }} / {{ n }}</li>
+    <li>{% if p < n %}<a href="{{ url_for(request.endpoint, page=p+1) }}" rel="next" aria-label="Page suivante"><i class="bi bi-chevron-right"></i></a>
+        {% else %}<span class="mf-pager-item is-disabled"><i class="bi bi-chevron-right"></i></span>{% endif %}</li>
+  </ul>
+
+  {# Ordinateur : Précédent · 1 … 4 5 6 … 20 · Suivant #}
+  <ul class="mf-pager-list d-none d-sm-flex">
+    <li>{% if p > 1 %}<a href="{{ url_for(request.endpoint, page=p-1) }}" rel="prev"><i class="bi bi-chevron-left me-1"></i>Précédent</a>
+        {% else %}<span class="mf-pager-item is-disabled"><i class="bi bi-chevron-left me-1"></i>Précédent</span>{% endif %}</li>
+    {% set shown = [] %}
+    {% for i in range(1, n + 1) %}
+      {% if i == 1 or i == n or (i >= p - 2 and i <= p + 2) %}
+        {% if shown and i - shown[-1] > 1 %}<li><span class="mf-pager-item is-gap">…</span></li>{% endif %}
+        {% set _ = shown.append(i) %}
+        <li>{% if i == p %}<span class="mf-pager-item is-current" aria-current="page">{{ i }}</span>
+            {% else %}<a href="{{ url_for(request.endpoint, page=i) }}">{{ i }}</a>{% endif %}</li>
+      {% endif %}
+    {% endfor %}
+    <li>{% if p < n %}<a href="{{ url_for(request.endpoint, page=p+1) }}" rel="next">Suivant<i class="bi bi-chevron-right ms-1"></i></a>
+        {% else %}<span class="mf-pager-item is-disabled">Suivant<i class="bi bi-chevron-right ms-1"></i></span>{% endif %}</li>
+  </ul>
+</nav>
+{% elif pg and pg.total %}
+<div class="mf-pager"><div class="mf-pager-count" style="font-size:.82rem;color:var(--mf-ink-soft);text-align:center;margin-top:14px">{{ pg.total }} événement{{ 's' if pg.total > 1 }}</div></div>
+{% endif %}

@@ -701,6 +701,23 @@ def change_password():
 # --------------------------------------------------------------------------
 # SÉCURITÉ — journal d'audit
 # --------------------------------------------------------------------------
+AUDIT_PAGE_SIZE = 50
+
+
+def paginate_audit(query, per_page=AUDIT_PAGE_SIZE):
+    """Pagination du journal : renvoie (lignes, infos). Un numéro de page invalide est ramené dans les limites, sans erreur."""
+    raw = (request.args.get("page") or "1").strip()
+    page = int(raw) if (raw.isascii() and raw.isdigit() and len(raw) <= 7) else 1
+    total = query.order_by(None).count()
+    pages = max(1, -(-total // per_page))
+    page = max(1, min(page, pages))
+    rows = (query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .offset((page - 1) * per_page).limit(per_page).all())
+    start = (page - 1) * per_page + 1 if total else 0
+    return rows, {"page": page, "pages": pages, "total": total, "per_page": per_page,
+                  "start": start, "end": start + len(rows) - 1 if rows else 0}
+
+
 @app.route("/admin/journal-securite")
 @login_required
 def admin_security_log():
@@ -710,12 +727,8 @@ def admin_security_log():
         flash("Cette page est réservée au gestionnaire du restaurant.", "error")
         return redirect(url_for("admin_orders"))
     restaurant = active_restaurant()
-    logs = (AuditLog.query
-            .filter_by(restaurant_id=restaurant.id)
-            .order_by(AuditLog.created_at.desc())
-            .limit(200)
-            .all())
-    return render_template("admin_security_log.html", restaurant=restaurant, logs=logs)
+    logs, pg = paginate_audit(AuditLog.query.filter_by(restaurant_id=restaurant.id))
+    return render_template("admin_security_log.html", restaurant=restaurant, logs=logs, pg=pg)
 
 
 @app.route("/super-admin/journal-securite")
@@ -723,8 +736,8 @@ def admin_security_log():
 def super_admin_security_log():
     if not current_user.is_super_admin:
         abort(403)
-    logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(300).all()
-    return render_template("super_admin_security_log.html", logs=logs)
+    logs, pg = paginate_audit(AuditLog.query)
+    return render_template("super_admin_security_log.html", logs=logs, pg=pg)
 
 
 def allowed_file(filename):
