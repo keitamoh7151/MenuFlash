@@ -106,7 +106,7 @@ pre, code { white-space: pre-wrap; word-break: break-word; }
 .mf-navbar .navbar-brand {
   min-width: 0;
   max-width: 100%;
-  flex: 1 1 auto;
+  flex: 1 1 0%;
   margin-right: 0;
 }
 .mf-navbar .navbar-brand > span:not(.badge):not(.mf-brand-mini) {
@@ -131,7 +131,7 @@ pre, code { white-space: pre-wrap; word-break: break-word; }
 @media (max-width: 575.98px) {
   .mf-navbar .btn-sm { padding: .3rem .55rem; }
   /* Barre du cuisinier (pas de menu replié) : les boutons passent à la ligne. */
-  .mf-navbar .container-fluid > .d-flex { width: 100%; justify-content: flex-start; }
+  .mf-navbar .container-fluid > .d-flex:not(.navbar-brand) { width: 100%; justify-content: flex-start; }
   .mf-restaurant-switcher .dropdown-toggle {
     max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
