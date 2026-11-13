@@ -1,0 +1,202 @@
+/* ==========================================================================
+   MenuFlash Mini — corrections d'affichage sur téléphone (responsive)
+
+   À charger APRÈS style.css (et après forms_security.css / super_admin.css).
+   Objectif : aucune page ne doit déborder horizontalement, de 320 px
+   (petits téléphones) jusqu'aux tablettes.
+
+   1. Garde-fous globaux (images, longs textes, débordement de page)
+   2. Tableau des plats du tableau de bord -> cartes empilées sur téléphone
+   3. Autres tableaux -> défilement horizontal DANS leur cadre
+   4. Barres de navigation (restaurateur, cuisine, super-admin)
+   5. Formulaires, champs et groupes de boutons
+   6. Cartes de statistiques, kanban, panel super-admin
+   7. Menu public et suivi de commande (côté client)
+   8. Page de présentation et inscription
+   ========================================================================== */
+
+/* ---------- 1. Garde-fous globaux ---------- */
+html, body {
+  max-width: 100%;
+  /* "clip" empêche tout défilement horizontal de la page sans casser
+     les éléments "sticky" (contrairement à overflow-x: hidden). */
+  overflow-x: clip;
+}
+img, video, canvas, svg, iframe { max-width: 100%; }
+canvas { height: auto; }
+pre, code { white-space: pre-wrap; word-break: break-word; }
+
+/* Les longs mots (emails, adresses de menu, noms de fichiers) passent à
+   la ligne au lieu de pousser la page. */
+.card-body, .modal-body, .alert, .toast-body, .dropdown-item,
+.mf-sa-note, .mf-audit-row, .mf-history-row, .list-group-item {
+  overflow-wrap: anywhere;
+}
+.container, .container-fluid { min-width: 0; }
+.row > * { min-width: 0; }
+
+/* Prix et montants : jamais coupés au milieu ("1 500 FCFA" sur une ligne). */
+.mf-item-price, .mf-myorder-total, .mf-cart-total, .mf-upsell-price,
+.mf-stat-num, .fw-bold[style*="accent-dark"] {
+  white-space: nowrap;
+}
+
+.toast-container { max-width: 100vw; }
+.toast { max-width: calc(100vw - 1.5rem); }
+
+/* ---------- 2. Tableau des plats (tableau de bord) ---------- */
+@media (max-width: 767.98px) {
+  .mf-category-block table.table { display: block; width: 100%; }
+  .mf-category-block table.table thead { display: none; }
+  .mf-category-block table.table tbody.mf-items-tbody { display: block; }
+
+  /* Chaque plat devient une petite carte sur 3 lignes :
+       [⠿] Photo + nom du plat ...........................
+           Prix                      Préparation
+           Disponible / Épuisé            ✎  🗑            */
+  .mf-items-tbody > tr {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "handle name    name"
+      ".      price   prep"
+      ".      avail   actions";
+    align-items: center;
+    gap: .35rem .5rem;
+    padding: .75rem .25rem;
+    border-bottom: 1px solid var(--mf-border, #E7E4DD);
+  }
+  .mf-items-tbody > tr:last-child { border-bottom: 0; }
+  .mf-items-tbody > tr > td {
+    display: block;
+    padding: 0 !important;
+    border: 0 !important;
+    min-width: 0;
+    background: transparent;
+  }
+  .mf-items-tbody > tr > td:nth-child(1) { grid-area: handle; align-self: start; padding-top: .7rem !important; }
+  .mf-items-tbody > tr > td:nth-child(2) { grid-area: name; }
+  .mf-items-tbody > tr > td:nth-child(3) { grid-area: price; white-space: nowrap; }
+  .mf-items-tbody > tr > td:nth-child(4) { grid-area: prep; text-align: right; white-space: nowrap; }
+  .mf-items-tbody > tr > td:nth-child(5) { grid-area: avail; }
+  .mf-items-tbody > tr > td:nth-child(6) { grid-area: actions; justify-self: end; }
+  .mf-items-tbody .mf-pill-toggle { white-space: nowrap; }
+
+  /* Formulaire "ajouter un plat" : champs pleine largeur, bouton visible. */
+  .mf-category-block form.row > [class*="col-md-"] { flex: 0 0 100%; max-width: 100%; }
+  .mf-category-block form.row button[type="submit"] { min-height: 38px; }
+}
+
+/* ---------- 3. Tous les autres tableaux ---------- */
+/* responsive.js entoure automatiquement chaque tableau d'un cadre
+   .table-responsive : sur téléphone, on fait défiler le tableau, pas la page. */
+.table-responsive { -webkit-overflow-scrolling: touch; }
+@media (max-width: 767.98px) {
+  .table-responsive > .table { min-width: 560px; }
+  .table-responsive > .table.table-sm { min-width: 520px; }
+  .table-responsive > .table td, .table-responsive > .table th { white-space: nowrap; }
+  .table-responsive > .table td .small, .table-responsive > .table td div { white-space: normal; }
+  .mf-category-block .table-responsive > .table { min-width: 0; }
+  .mf-category-block .table-responsive > .table td,
+  .mf-category-block .table-responsive > .table th { white-space: normal; }
+}
+
+/* ---------- 4. Barres de navigation ---------- */
+.mf-navbar .container-fluid { flex-wrap: wrap; gap: .5rem; }
+.mf-navbar .navbar-brand {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+  margin-right: 0;
+}
+.mf-navbar .navbar-brand > span:not(.badge):not(.mf-brand-mini) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.mf-navbar .dropdown-menu { max-width: calc(100vw - 1.5rem); }
+@media (max-width: 991.98px) {
+  .mf-navbar .navbar-collapse > div,
+  .mf-navbar .navbar-collapse > ul { width: 100%; }
+  /* Menu déplié : les boutons se rangent côte à côte et passent à la
+     ligne, au lieu d'une longue colonne d'un bouton par ligne. */
+  .mf-navbar .navbar-collapse .navbar-nav { flex-direction: row; flex-wrap: wrap; gap: .5rem; }
+  .mf-navbar .navbar-collapse .dropdown,
+  .mf-navbar .navbar-collapse .nav-item { max-width: 100%; }
+  /* Menus déroulants dans la barre repliée : affichés sous le bouton,
+     pas en dehors de l'écran. */
+  .mf-navbar .navbar-collapse .dropdown-menu { position: static; float: none; transform: none !important; }
+}
+@media (max-width: 575.98px) {
+  .mf-navbar .btn-sm { padding: .3rem .55rem; }
+  /* Barre du cuisinier (pas de menu replié) : les boutons passent à la ligne. */
+  .mf-navbar .container-fluid > .d-flex { width: 100%; justify-content: flex-start; }
+  .mf-restaurant-switcher .dropdown-toggle {
+    max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+}
+
+/* ---------- 5. Formulaires ---------- */
+.form-control, .form-select, .input-group { min-width: 0; max-width: 100%; }
+input[type="file"].form-control { overflow: hidden; text-overflow: ellipsis; }
+.input-group > .form-control, .input-group > .form-select { min-width: 0; }
+@media (max-width: 575.98px) {
+  /* Groupes "champ + bouton" côte à côte : le champ rétrécit, le bouton reste visible. */
+  form.d-flex { flex-wrap: wrap; }
+  form.d-flex > .form-control, form.d-flex > .form-select { flex: 1 1 140px; }
+  .modal-dialog { margin: .5rem; }
+  .modal-footer { flex-wrap: wrap; }
+  .mf-auth-card { padding: .5rem !important; }
+}
+
+/* ---------- 6. Statistiques, kanban, super-admin ---------- */
+@media (max-width: 575.98px) {
+  .mf-stat-num { font-size: 1.35rem; }
+  /* Rangées de cartes en ".col" : 2 par ligne au lieu d'être écrasées. */
+  .row > .col { flex: 1 0 45%; }
+  .mf-kanban-col { min-height: 0; }
+  .mf-order-card-k .d-flex.gap-2 { flex-wrap: wrap; }
+  .mf-section-card .card-body { padding: 1rem .85rem; }
+  .container.py-4, .container.py-5 { padding-left: .75rem; padding-right: .75rem; }
+  .mf-sa-error summary { word-break: break-word; }
+  .mf-sa-alerts li { align-items: flex-start; }
+}
+
+/* ---------- 7. Menu public et suivi de commande ---------- */
+.mf-hero h1 { overflow-wrap: anywhere; padding: 0 .5rem; }
+@media (max-width: 575.98px) {
+  .mf-hero { padding-top: 64px; }
+  .mf-item-card .card-body { gap: .6rem !important; }
+  .mf-item-img, .mf-item-noimg { width: 72px; height: 72px; }
+  .mf-qty-group { margin-left: auto; }
+  .mf-cart-bar { padding-left: 12px; padding-right: 12px; }
+  .mf-cart-bar .container { gap: .5rem; padding-left: 0; padding-right: 0; }
+  .mf-cart-bar .container > div { min-width: 0; }
+  .mf-cart-bar .btn { white-space: nowrap; flex-shrink: 0; padding-left: .8rem !important; padding-right: .8rem !important; }
+  .mf-myorders-fab { max-width: 46vw; }
+  .mf-step-labels { font-size: .66rem; gap: .25rem; }
+  .mf-step-labels span { text-align: center; flex: 1 1 0; }
+  .mf-upsell-item { gap: .5rem; }
+  .mf-upsell-add-btn { white-space: nowrap; }
+}
+
+@media (max-width: 359.98px) {
+  .mf-cart-bar .btn { font-size: .82rem; padding-left: .6rem !important; padding-right: .6rem !important; }
+  .mf-cart-total { font-size: .95rem; }
+}
+
+/* ---------- 8. Présentation et inscription ---------- */
+@media (max-width: 575.98px) {
+  .mf-landing-h1 { font-size: 1.75rem; overflow-wrap: anywhere; }
+  .mf-landing-h2 { font-size: 1.5rem; }
+  .mf-landing-subnote { display: flex; flex-direction: column; gap: .35rem; }
+  .mf-landing-subnote i.ms-3 { margin-left: 0 !important; }
+  .mf-landing-trustbar .container { gap: .75rem !important; }
+  .mf-phone-mock { width: min(280px, 82vw); }
+  .mf-phone-float-badge-1 { left: 0; }
+  .mf-phone-float-badge-2 { right: 0; }
+  .mf-signup-card { padding: 1.5rem 1rem; }
+  .mf-signup-url-prefix { font-size: .72rem; padding-left: .5rem; padding-right: .5rem; }
+  .mf-landing-nav .container { gap: .5rem; }
+}
