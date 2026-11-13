@@ -154,6 +154,23 @@ def validate_display_name(raw, label):
     return value, None
 
 
+def validate_label(raw, label, max_len):
+    """Libellé court saisi par un restaurateur (catégorie, plat, table).
+    Contrairement à validate_display_name, n'exige pas de lettre (« 5 », « 7 Up »).
+    Renvoie (valeur_nettoyée, erreur). Une valeur vide n'est PAS une erreur ici :
+    la route garde son propre message « obligatoire »."""
+    value = unicodedata.normalize("NFC", raw or "")
+    value = "".join(ch for ch in value if unicodedata.category(ch)[0] != "C")
+    value = re.sub(r"\s+", " ", value).strip()
+    if not value:
+        return value, None
+    if len(value) > max_len:
+        return value, f"{label} ne doit pas dépasser {max_len} caractères."
+    if any(ch in _FORBIDDEN_NAME_CHARS for ch in value):
+        return value, f"{label} contient des caractères non autorisés (< > {{ }} ` \\)."
+    return value, None
+
+
 def validate_phone(raw):
     """Téléphone optionnel. Renvoie (valeur_nettoyée_ou_vide, erreur)."""
     value = re.sub(r"\s+", " ", (raw or "")).strip()
@@ -256,7 +273,8 @@ def init_form_security(app, limiter=None):
             session["mf_prefill"] = prefill
         _audit(app, request.endpoint, errors)
         target = _REDIRECT_TO.get(request.endpoint, request.endpoint)
-        return redirect(url_for(target, **(request.view_args or {})))
+        view_args = (request.view_args or {}) if target == request.endpoint else {}
+        return redirect(url_for(target, **view_args))
 
     if limiter is not None and "change_password" in app.view_functions:
         app.view_functions["change_password"] = limiter.limit(
@@ -385,10 +403,36 @@ def _super_admin_create(form, secret):
     return errors, None
 
 
+def _restaurant_new(form, secret):
+    """Restaurant additionnel (audit MF-01) : même règle que l'inscription."""
+    errors = []
+    _, err = validate_display_name(form.get("name"), "Le nom du restaurant")
+    if err:
+        errors.append(err)
+    _, err = validate_slug(form.get("slug"))
+    if err:
+        errors.append(err)
+    return errors, None
+
+
+def _label_handler(field, label, max_len):
+    """Fabrique un contrôle pour un formulaire avec un seul libellé (audit MF-01 / MF-07)."""
+    def handler(form, secret):
+        _, err = validate_label(form.get(field), label, max_len)
+        return ([err] if err else []), None
+    return handler
+
+
 # Routes POST-only : en cas d'erreur, on renvoie vers la page du formulaire.
 _REDIRECT_TO = {
     "admin_team_add": "admin_team",
     "super_admin_create_restaurant": "super_admin_clients",
+    "admin_restaurants_new": "admin_dashboard",
+    "add_category": "admin_dashboard",
+    "edit_category": "admin_dashboard",
+    "add_item": "admin_dashboard",
+    "edit_item": "admin_dashboard",
+    "admin_qrcodes_add": "admin_qrcodes",
 }
 
 _HANDLERS = {
@@ -399,5 +443,12 @@ _HANDLERS = {
     "change_password": _change,
     "admin_team_add": _team_add,
     "super_admin_create_restaurant": _super_admin_create,
+    # Audit MF-01 / MF-07 : libellés affichés aux clients et dans le panel.
+    "admin_restaurants_new": _restaurant_new,
+    "add_category": _label_handler("name", "Le nom de la catégorie", 80),
+    "edit_category": _label_handler("name", "Le nom de la catégorie", 80),
+    "add_item": _label_handler("name", "Le nom du plat", 120),
+    "edit_item": _label_handler("name", "Le nom du plat", 120),
+    "admin_qrcodes_add": _label_handler("label", "Le nom de la table", 50),
 }
 

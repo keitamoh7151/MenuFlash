@@ -42,13 +42,25 @@
     var toastEl = document.createElement("div");
     toastEl.className = "toast align-items-center border-0 shadow mb-2";
     toastEl.setAttribute("role", "alert");
-    toastEl.innerHTML =
-      '<div class="d-flex">' +
-        '<div class="toast-body d-flex align-items-center gap-2">' +
-          '<i class="bi ' + icon + '"></i><span>' + message + '</span>' +
-        '</div>' +
-        '<button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>' +
-      '</div>';
+    // Sécurité (audit MF-01) : le message est TOUJOURS inséré comme texte, jamais comme HTML.
+    var row = document.createElement("div");
+    row.className = "d-flex";
+    var body = document.createElement("div");
+    body.className = "toast-body d-flex align-items-center gap-2";
+    var iconEl = document.createElement("i");
+    iconEl.className = "bi " + icon;
+    var textEl = document.createElement("span");
+    textEl.textContent = message == null ? "" : String(message);
+    body.appendChild(iconEl);
+    body.appendChild(textEl);
+    var closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn-close me-2 m-auto";
+    closeBtn.setAttribute("data-bs-dismiss", "toast");
+    closeBtn.setAttribute("aria-label", "Fermer");
+    row.appendChild(body);
+    row.appendChild(closeBtn);
+    toastEl.appendChild(row);
     container.appendChild(toastEl);
     var toast = new bootstrap.Toast(toastEl, { delay: 6000 });
     toast.show();
@@ -453,7 +465,7 @@
       var html = '<ul class="list-group list-group-flush mb-3">';
       cart.lines.forEach(function (line) {
         html += '<li class="list-group-item d-flex justify-content-between px-0">' +
-          '<span>' + line.qty + ' × ' + line.name + '</span>' +
+          '<span>' + escapeHtml(line.qty) + ' × ' + escapeHtml(line.name) + '</span>' +
           '<span class="fw-semibold">' + formatNumber(line.qty * line.price) + ' ' + currency + '</span>' +
           '</li>';
       });
@@ -469,9 +481,9 @@
           '<div class="mf-upsell-title"><i class="bi bi-stars"></i>' + upsellTitle + '</div>';
         upsell.forEach(function (sug) {
           html += '<div class="mf-upsell-item">' +
-            '<span><span class="mf-upsell-name">' + sug.name + '</span>' +
+            '<span><span class="mf-upsell-name">' + escapeHtml(sug.name) + '</span>' +
             '<span class="mf-upsell-price">' + formatNumber(sug.price) + ' ' + currency + '</span></span>' +
-            '<button type="button" class="mf-upsell-add-btn" data-suggest-id="' + sug.id + '">' +
+            '<button type="button" class="mf-upsell-add-btn" data-suggest-id="' + escapeHtml(sug.id) + '">' +
             '<i class="bi bi-plus-lg me-1"></i>' + addLabel + '</button>' +
             '</div>';
         });
@@ -629,17 +641,17 @@
 
     function renderMyOrder(order) {
       var itemsHtml = order.items.map(function (it) {
-        return "<li>" + it.quantity + " × " + it.name + "</li>";
+        return "<li>" + escapeHtml(it.quantity) + " × " + escapeHtml(it.name) + "</li>";
       }).join("");
-      var noteHtml = order.notes ? '<p class="text-secondary small mb-2">📝 ' + order.notes + "</p>" : "";
-      var detailUrl = "/m/" + slug + "/commande/" + order.id;
+      var noteHtml = order.notes ? '<p class="text-secondary small mb-2">📝 ' + escapeHtml(order.notes) + "</p>" : "";
+      var detailUrl = "/m/" + encodeURIComponent(slug) + "/commande/" + encodeURIComponent(order.id);
 
       var actionsHtml = "";
       if (order.editable) {
         actionsHtml =
           '<div class="mf-myorder-actions">' +
             '<button type="button" class="btn btn-outline-secondary btn-sm mf-myorder-addbtn mf-addto-btn" ' +
-            'data-order-id="' + order.id + '" data-table-label="' + (order.table_label || "") + '">' +
+            'data-order-id="' + escapeHtml(order.id) + '" data-table-label="' + escapeHtml(order.table_label || "") + '">' +
             '<i class="bi bi-plus-lg me-1"></i>' + (translateKey("add_dishes_btn") || "Ajouter des plats") + '</button>' +
             '<button type="button" class="btn btn-outline-danger btn-sm mf-myorder-cancelbtn mf-cancel-order-trigger" ' +
             'data-order-id="' + order.id + '">' +
@@ -651,7 +663,7 @@
         '<div class="card mf-myorder-card" data-order-id="' + order.id + '">' +
           '<div class="card-body">' +
             '<div class="d-flex justify-content-between align-items-start mb-2">' +
-              '<span class="badge mf-status-badge mf-status-' + order.status + '">' + statusLabel(order.status) + '</span>' +
+              '<span class="badge mf-status-badge mf-status-' + escapeHtml(order.status) + '">' + escapeHtml(statusLabel(order.status)) + '</span>' +
               (order.reference
                 ? '<span class="small text-secondary mf-myorder-ref">' + escapeHtml(order.reference.slice(0, -3)) +
                   '<strong>' + escapeHtml(order.reference.slice(-3)) + '</strong></span>'
@@ -940,14 +952,14 @@
 
     function renderCard(order, nextLabel, isNew) {
       var itemsHtml = order.items.map(function (it) {
-        return "<li>" + it.quantity + " × " + it.name + "</li>";
+        return "<li>" + escapeHtml(it.quantity) + " × " + escapeHtml(it.name) + "</li>";
       }).join("");
-      var noteHtml = order.notes ? '<p class="mf-order-note mb-2">📝 ' + order.notes + "</p>" : "";
+      var noteHtml = order.notes ? '<p class="mf-order-note mb-2">📝 ' + escapeHtml(order.notes) + "</p>" : "";
       return (
         '<div class="card mf-order-card-k mb-2 ' + (isNew ? "mf-animate-in mf-pulse" : "") + '" data-order-id="' + order.id + '">' +
           '<div class="card-body p-3">' +
             '<div class="d-flex justify-content-between align-items-center mb-2">' +
-              '<strong>' + order.table_label + '</strong>' +
+              '<strong>' + escapeHtml(order.table_label) + '</strong>' +
               '<span class="mf-elapsed">' + order.elapsed_minutes + ' min</span>' +
             '</div>' +
             '<ul class="mb-2 ps-3 small">' + itemsHtml + '</ul>' +
