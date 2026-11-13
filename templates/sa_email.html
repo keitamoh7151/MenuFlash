@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Adresse email — MenuFlash{% endblock %}
+{% block content %}
+{% if state == 'form' %}
+{% include "_super_admin_navbar.html" %}
+<div class="container py-4" style="max-width: 560px;">
+  <div class="card mf-section-card"><div class="card-body">
+    <h2 class="mf-section-title fs-6 mb-3">Adresse email de connexion</h2>
+    <div class="d-flex justify-content-between small border-bottom pb-2 mb-3">
+      <span>Adresse actuelle</span><strong>{{ current_email }}</strong>
+    </div>
+    <p class="small text-secondary">Un lien de confirmation sera envoyé à la nouvelle adresse.
+      L'adresse ne change qu'après la confirmation ; vous devrez ensuite vous reconnecter.
+      Votre double authentification reste inchangée.</p>
+    <form method="post" data-mf-guard autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3">
+        <label for="sa-new-email" class="form-label small fw-semibold">Nouvelle adresse email</label>
+        <input type="email" id="sa-new-email" name="new_email" class="form-control" maxlength="120"
+               autocomplete="email" required autofocus>
+      </div>
+      <div class="mb-3">
+        <label for="sa-email-password" class="form-label small fw-semibold">Mot de passe actuel</label>
+        <input type="password" id="sa-email-password" name="password" class="form-control"
+               autocomplete="current-password" required>
+      </div>
+      <div class="mb-4">
+        <label for="sa-email-code" class="form-label small fw-semibold">Code de l'application d'authentification</label>
+        <input type="text" id="sa-email-code" name="code" class="form-control text-center" inputmode="numeric"
+               maxlength="7" autocomplete="one-time-code" required>
+      </div>
+      <button type="submit" class="btn btn-primary w-100">Envoyer le lien de confirmation</button>
+    </form>
+  </div></div>
+</div>
+{% else %}
+<div class="mf-auth-bg">
+  <div class="card mf-auth-card p-2" style="max-width: 440px;">
+    <div class="card-body p-4 text-center">
+      {% if state == 'confirm' %}
+        <i class="bi bi-envelope-check" style="font-size: 2rem; color: var(--mf-accent);"></i>
+        <h1 class="h5 fw-bold mt-2 mb-2">Confirmer la nouvelle adresse</h1>
+        <p class="small text-secondary mb-3">Votre adresse de connexion deviendra
+          <strong>{{ new_email }}</strong>. Toutes vos sessions seront fermées.</p>
+        <form method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-primary w-100">Confirmer le changement</button>
+        </form>
+      {% else %}
+        <i class="bi bi-x-octagon" style="font-size: 2.2rem; color: var(--mf-danger);"></i>
+        <h1 class="h5 fw-bold mt-2 mb-2">Lien invalide ou expiré</h1>
+        <p class="small text-secondary mb-3">Ce lien a déjà été utilisé, a expiré (1 heure), ou n'est plus valable.
+          Refaites la demande depuis votre compte.</p>
+        <a href="{{ url_for('admin_login') }}" class="btn btn-outline-secondary btn-sm">Aller à la connexion</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

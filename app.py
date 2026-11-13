@@ -2084,6 +2084,9 @@ init_super_admin(
     min_password_length=MIN_PASSWORD_LENGTH,
 )
 
+from sa_email import init_sa_email
+init_sa_email(app, log_audit=log_audit, limiter=limiter)
+
 from two_factor import init_two_factor
 init_two_factor(app, log_audit=log_audit, limiter=limiter)
 
