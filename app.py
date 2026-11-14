@@ -2315,6 +2315,10 @@ import turnstile_guard                             # audit MF-18 : anti-robot su
 turnstile_guard.init(app, log_audit=log_audit, client_ip=get_client_ip)
 
 
+import qr_access_guard                           # audit IDOR-01 : QR de table réservés au gérant
+qr_access_guard.init(app, log_audit=log_audit)
+
+
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
