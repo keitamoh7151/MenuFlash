@@ -190,12 +190,18 @@ login_manager.login_view = "admin_login"
 
 csrf = CSRFProtect(app)
 
+import shared_counters                     # audit MF-08 : compteurs dans Redis (Render Key Value)
+
 limiter = Limiter(
     key_func=get_remote_address,
     app=app,
     default_limits=["1000 per minute"],
-    storage_uri="memory://",
+    storage_uri=shared_counters.STORAGE_URI,
+    storage_options=shared_counters.STORAGE_OPTIONS,
+    in_memory_fallback_enabled=True,       # Redis en panne : le site continue, compteurs en mémoire
+    key_prefix="menuflash",
 )
+shared_counters.check_config()
 limiter.exempt(app.view_functions["static"])
 from security_forms import init_form_security
 init_form_security(app, limiter)

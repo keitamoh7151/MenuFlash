@@ -172,7 +172,18 @@ class SlidingWindow:
         return len(q) if q else 0
 
 
-_invalid_hits = SlidingWindow(INVALID_WINDOW)
+_invalid_hits = SlidingWindow(INVALID_WINDOW)      # conservé pour compatibilité (plus utilisé)
+
+
+def _invalid_hit(ip):
+    """Audit MF-08 : faux QR codes comptés dans Redis (survit aux redémarrages)."""
+    import shared_counters
+    return shared_counters.hit("qr_invalide", ip, INVALID_WINDOW)
+
+
+def _invalid_count(ip):
+    import shared_counters
+    return shared_counters.count("qr_invalide", ip)
 
 
 def claim_matches(claim_id, claim_label, bound_id, bound_label):
@@ -386,7 +397,7 @@ def init_qr_security(app, *, owner_required, active_restaurant, log_audit):
     # ------------------------------------------------------------------ audit (plafonné)
     def audit(action, restaurant, details):
         ip = request.remote_addr or "?"
-        if _invalid_hits.count(ip) > AUDIT_PER_WINDOW + INVALID_LIMIT:      # tempête : on ne remplit pas le journal
+        if _invalid_count(ip) > AUDIT_PER_WINDOW + INVALID_LIMIT:      # tempête : on ne remplit pas le journal
             return
         try:
             log_audit(action, success=False, restaurant_id=restaurant.id, user_email=None,
@@ -445,7 +456,7 @@ def init_qr_security(app, *, owner_required, active_restaurant, log_audit):
 
         # 3) Adresse modifiée (autre nom, numéro, texte…) : on ne change PAS de table.
         ip = request.remote_addr or "?"
-        n = _invalid_hits.hit(ip)
+        n = _invalid_hit(ip)
         if n > INVALID_LIMIT:
             return Response(MSG_TOO_MANY, 429, {"Retry-After": str(INVALID_WINDOW),
                                                 "Content-Type": "text/plain; charset=utf-8"})
