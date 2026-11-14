@@ -467,6 +467,7 @@
   }
 
   function scan() { addToCards(); addToTracking(); }
+  window.MFOrderEditScan = scan;      // utilisé par app.js : le bouton « Modifier » apparaît avec sa carte
 
   function init() {
     injectCss();

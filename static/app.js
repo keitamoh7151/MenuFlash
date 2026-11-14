@@ -705,6 +705,64 @@
       }
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // Panneau « Mes commandes » : synchronisé carte par carte (audit « panneau instable »).
+    // Avant : tout le panneau était reconstruit toutes les 6 s (innerHTML), même sans changement : les boutons
+    // clignotaient et un appui en cours était perdu. Maintenant : une carte inchangée n'est jamais touchée.
+    // ------------------------------------------------------------------------------------------------
+    var renderedById = {};            // numéro de commande -> dernier HTML construit pour sa carte
+    var refreshSeq = 0, appliedSeq = 0;
+
+    function htmlToElement(html) {
+      var tpl = document.createElement("template");
+      tpl.innerHTML = html.trim();
+      return tpl.content.firstElementChild;
+    }
+
+    // Garde le bouton « Modifier la commande » (ajouté par order_edit.js, avec son action) quand une carte est remplacée.
+    function carryEditButton(oldCard, newCard) {
+      var btn = oldCard.querySelector(".mf-myorder-editbtn");
+      var actions = newCard.querySelector(".mf-myorder-actions");
+      var cancel = newCard.querySelector(".mf-cancel-order-trigger");
+      if (btn && actions && cancel && !newCard.querySelector(".mf-myorder-editbtn")) {
+        actions.insertBefore(btn, cancel);
+      }
+    }
+
+    function syncMyOrders(orders) {
+      var wanted = orders.slice().reverse();            // même ordre qu'avant : la plus récente en haut
+      var existing = {};
+      Array.prototype.forEach.call(myOrdersList.children, function (card) {
+        existing[card.getAttribute("data-order-id")] = card;
+      });
+      var seen = {};
+      wanted.forEach(function (order, index) {
+        var key = String(order.id);
+        seen[key] = true;
+        var html = renderMyOrder(order);
+        var card = existing[key];
+        if (!card || renderedById[key] !== html) {      // nouvelle carte, ou contenu réellement modifié
+          var fresh = htmlToElement(html);
+          if (card) {
+            carryEditButton(card, fresh);
+            myOrdersList.replaceChild(fresh, card);
+          }
+          renderedById[key] = html;
+          card = fresh;
+        }
+        var current = myOrdersList.children[index];
+        if (current !== card) myOrdersList.insertBefore(card, current || null);
+      });
+      Object.keys(existing).forEach(function (key) {   // commandes qui ne sont plus à afficher
+        if (!seen[key]) {
+          myOrdersList.removeChild(existing[key]);
+          delete renderedById[key];
+        }
+      });
+      // Le bouton « Modifier la commande » apparaît dans la même image que la carte (pas 50 ms plus tard).
+      if (typeof window.MFOrderEditScan === "function") window.MFOrderEditScan();
+    }
+
     function refreshMyOrders() {
       if (!myOrdersList) return;
       var ids = getStoredIds();
@@ -713,18 +771,21 @@
         updateBadge(0);
         return;
       }
-      fetch("/m/" + slug + "/commandes/etats.json?ids=" + ids.join(","))
+      var mySeq = ++refreshSeq;
+      fetch("/m/" + slug + "/commandes/etats.json?ids=" + ids.join(","), { cache: "no-store" })
         .then(function (r) { return r.json(); })
         .then(function (data) {
+          if (mySeq < appliedSeq) return;               // réponse plus ancienne que celle déjà affichée : ignorée
+          appliedSeq = mySeq;
           var orders = data.orders || [];
           if (orders.length === 0) {
             if (myOrdersEmpty) myOrdersEmpty.style.display = "";
-            myOrdersList.innerHTML = "";
+            syncMyOrders([]);
             updateBadge(0);
             return;
           }
           if (myOrdersEmpty) myOrdersEmpty.style.display = "none";
-          myOrdersList.innerHTML = orders.slice().reverse().map(renderMyOrder).join("");
+          syncMyOrders(orders);
 
           var activeCount = orders.filter(function (o) {
             return o.status !== "servie" && o.status !== "annulee";
@@ -753,7 +814,8 @@
 
     updateCartUI();
     refreshMyOrders();
-    setInterval(refreshMyOrders, 6000);
+    setInterval(function () { if (!document.hidden) refreshMyOrders(); }, 6000);      // rien à faire onglet caché
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) refreshMyOrders(); });
   }
 
   function initCategoryNav() {
