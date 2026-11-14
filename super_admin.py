@@ -250,12 +250,14 @@ def _parse_date(raw):
 def _csv_response(filename, header, rows):
     buf = io.StringIO()
     buf.write("\ufeff")  # BOM : Excel reconnaît l'UTF-8 (accents)
-    writer = csv.writer(buf, delimiter=";")
+    from csv_safe import safe_writer               # audit MF-14 : pas de formule exécutable
+    writer = safe_writer(buf, delimiter=";")
     writer.writerow(header)
     for row in rows:
         writer.writerow(row)
     return Response(buf.getvalue(), mimetype="text/csv; charset=utf-8",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"',
+                             "Cache-Control": "no-store"})
 
 
 def _fmt(n):

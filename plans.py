@@ -254,7 +254,8 @@ def init_plans(app, *, super_admin_required, active_restaurant, log_audit=None):
             return locked("data_export")
         output = io.StringIO(newline="")
         output.write("\ufeff")
-        writer = csv.writer(output, delimiter=";")
+        from csv_safe import safe_writer           # audit MF-14 : pas de formule exécutable
+        writer = safe_writer(output, delimiter=";")
         writer.writerow(["Commande", "Date UTC", "Statut", "Table / retrait", "Total",
                          "Devise", "Articles", "Notes"])
         orders = (Order.query.filter_by(restaurant_id=restaurant.id)
