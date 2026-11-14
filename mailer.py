@@ -40,6 +40,17 @@ from email.utils import formataddr, make_msgid
 logger = logging.getLogger("menuflash.mailer")
 
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
+
+
+def _mask(email):
+    """a***@domaine.com : l'adresse reste reconnaissable sans être lisible (audit MF-15)."""
+    email = str(email or "")
+    local, _, domain = email.partition("@")
+    return (local[:1] + "***@" + domain) if domain else "***"
+
+
+def _on_render():
+    return bool(os.environ.get("RENDER"))
 HTTP_TIMEOUT = 10
 SMTP_TIMEOUT = 10
 
@@ -50,8 +61,12 @@ def init_mailer(app):
     mode = _mode(app)
     sender = app.config.get("MAIL_DEFAULT_SENDER", "")
     if mode == "log":
-        logger.warning("Emails NON configurés : ils seront seulement écrits dans les logs. "
-                       "Définissez BREVO_API_KEY et MAIL_DEFAULT_SENDER.")
+        if _on_render():
+            logger.error("Emails NON configurés en production : AUCUN email ne part (réinitialisations, "
+                         "invitations, alertes). Définissez BREVO_API_KEY et MAIL_DEFAULT_SENDER.")
+        else:
+            logger.warning("Emails NON configurés : ils seront seulement écrits dans les logs (local). "
+                           "Définissez BREVO_API_KEY et MAIL_DEFAULT_SENDER.")
     elif sender.endswith(".local"):
         logger.warning("MAIL_DEFAULT_SENDER (%s) n'est pas une vraie adresse : les emails seront refusés. "
                        "Utilisez l'adresse vérifiée dans Brevo.", sender)
@@ -75,7 +90,7 @@ def send_transactional_email(app, to, subject, body_text):
     """Envoie un email texte. Ne lève jamais d'exception : renvoie True / False."""
     to = (to or "").strip()
     if not to or "@" not in to or "\n" in to or "\r" in to:
-        logger.error("Email non envoyé : destinataire invalide (%r).", to)
+        logger.error("Email non envoyé : destinataire invalide (%s).", _mask(to))
         return False
     subject = " ".join((subject or "").split())[:200]
     mode = _mode(app)
@@ -85,10 +100,15 @@ def send_transactional_email(app, to, subject, body_text):
         if mode == "smtp":
             return _send_smtp(app, to, subject, body_text)
     except Exception:
-        logger.exception("Échec d'envoi de l'email « %s » à %s (mode %s).", subject, to, mode)
+        logger.exception("Échec d'envoi de l'email « %s » à %s (mode %s).", subject, _mask(to), mode)
         return False
-    logger.warning("EMAIL NON ENVOYÉ (aucun service configuré)\nÀ : %s\nObjet : %s\n\n%s",
-                   to, subject, body_text)
+    if _on_render():
+        # Audit MF-15 : jamais le contenu en production (liens de réinitialisation, invitations…).
+        logger.error("EMAIL NON ENVOYÉ (aucun service configuré) — À : %s — Objet : %s",
+                     _mask(to), subject)
+    else:
+        logger.warning("EMAIL NON ENVOYÉ (aucun service configuré, mode local)\nÀ : %s\nObjet : %s\n\n%s",
+                       to, subject, body_text)
     return False
 
 
@@ -114,11 +134,11 @@ def _send_brevo(app, to, subject, body_text):
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
             ok = 200 <= resp.status < 300
             if ok:
-                logger.info("Email « %s » envoyé à %s (Brevo).", subject, to)
+                logger.info("Email « %s » envoyé à %s (Brevo).", subject, _mask(to))
             return ok
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "ignore")[:500]
-        logger.error("Brevo a refusé l'email « %s » à %s : HTTP %s %s", subject, to, exc.code, detail)
+        logger.error("Brevo a refusé l'email « %s » à %s : HTTP %s %s", subject, _mask(to), exc.code, detail)
         return False
 
 
@@ -143,5 +163,5 @@ def _send_smtp(app, to, subject, body_text):
         if user:
             server.login(user, pwd)
         server.send_message(msg)
-    logger.info("Email « %s » envoyé à %s (SMTP).", subject, to)
+    logger.info("Email « %s » envoyé à %s (SMTP).", subject, _mask(to))
     return True
