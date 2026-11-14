@@ -350,6 +350,9 @@ def safe_int(raw_value, default=None, min_value=None, max_value=None):
 
 
 def get_client_ip():
+    from flask import has_request_context
+    if not has_request_context():                 # tâche de fond (ex. sauvegarde automatique)
+        return "système"
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
         return forwarded.split(",")[0].strip()[:64]
