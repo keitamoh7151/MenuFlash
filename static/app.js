@@ -52,13 +52,15 @@
     iconEl.className = "bi " + icon;
     var textEl = document.createElement("span");
     textEl.textContent = message == null ? "" : String(message);
+    textEl.style.flex = "1 1 auto";
+    textEl.style.minWidth = "0";
     body.appendChild(iconEl);
     body.appendChild(textEl);
     if (link && typeof link.href === "string" && link.href.charAt(0) === "/" &&
         link.href.charAt(1) !== "/" && link.href.indexOf("\\") === -1) {
       var linkEl = document.createElement("a");
       linkEl.href = link.href;
-      linkEl.className = "fw-bold ms-1";
+      linkEl.className = "btn btn-sm btn-outline-dark fw-bold py-0 px-2 flex-shrink-0 text-nowrap";
       linkEl.textContent = link.label || "Voir";
       body.appendChild(linkEl);
     }
@@ -1123,7 +1125,7 @@
           if (lastId !== null && data.latest_id > lastId) {
             playNotificationSound();
             showToast(
-              "\uD83C\uDD95 Nouvelle commande · " + (data.latest_table || "") + " —",
+              "\uD83C\uDD95 Nouvelle commande · " + (data.latest_table || ""),
               false,
               { href: "/admin/commandes", label: "Voir" }
             );
