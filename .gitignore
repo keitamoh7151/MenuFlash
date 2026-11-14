@@ -6,3 +6,6 @@ __pycache__/
 static/uploads/*
 !static/uploads/.gitkeep
 .vscode/
+
+# Copies de sauvegarde des scripts de correction
+*.avant*
