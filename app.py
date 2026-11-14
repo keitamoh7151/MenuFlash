@@ -155,11 +155,32 @@ app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 app.config["SESSION_COOKIE_NAME"] = "menuflash_session"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
+# Audit MF-09 : sur Render, cookies Secure et HTTPS forcé PAR DÉFAUT. On ne peut
+# les désactiver qu'en écrivant explicitement « false » (erreur dans les logs).
+_ON_RENDER = bool(os.environ.get("RENDER"))
+
+
+def _secure_flag(name):
+    raw = (os.environ.get(name) or "").strip().lower()
+    if raw in ("true", "1", "yes", "oui"):
+        return True
+    if raw in ("false", "0", "no", "non"):
+        if _ON_RENDER:
+            logging.getLogger("menuflash").error(
+                "%s=false sur Render : protection HTTPS désactivée volontairement. "
+                "Supprimez cette variable (ou mettez true).", name)
+        return False
+    return _ON_RENDER                     # absente : activée en production, désactivée en local
+
+
+app.config["SESSION_COOKIE_SECURE"] = _secure_flag("SECURE_COOKIES")
+app.config["REMEMBER_COOKIE_SECURE"] = app.config["SESSION_COOKIE_SECURE"]
+app.config["REMEMBER_COOKIE_HTTPONLY"] = True
+app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
 
 app.config["WTF_CSRF_TIME_LIMIT"] = None
 
-FORCE_HTTPS = os.environ.get("FORCE_HTTPS", "false").lower() == "true"
+FORCE_HTTPS = _secure_flag("FORCE_HTTPS")          # audit MF-09
 
 app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "")
 app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", "587"))
