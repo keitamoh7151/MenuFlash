@@ -19,9 +19,7 @@ python app.py
 - **Page de présentation** : http://127.0.0.1:5000/
 - **Inscription en libre-service** : http://127.0.0.1:5000/inscription
 - Menu public de démo : http://127.0.0.1:5000/m/chez-awa
-- Connexion gestionnaire : `awa@example.com` / `motdepasse123`
-- Connexion cuisinier (accès limité) : `cuisine@example.com` / `cuisine1234`
-- Panel super-admin : `admin@menuflash.com` / `SuperAdmin123!`
+Comptes de démonstration : créés par python seed.py (en LOCAL uniquement). Les identifiants sont affichés dans le terminal au moment de la création. ⚠️ Ne jamais lancer seed.py sur la base de production.
 
 ⚠️ **Important** : `requirements.txt` épingle `Flask==3.0.3` et
 `Werkzeug==3.0.6`. Vérifie toujours avec
