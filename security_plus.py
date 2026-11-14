@@ -632,11 +632,51 @@ def init_security_plus(app, *, limiter, log_audit, owner_required, active_restau
             return redirect(url_for("admin_login"))
         return None
 
-    @app.before_request
+    # ---- Audit MF-05 : un compte désactivé ne peut plus revenir, par aucun chemin.
     def _logout_disabled():
-        if current_user.is_authenticated and not current_user.is_owner \
-                and (request.endpoint or "") not in _SESSION_SKIP and is_disabled(current_user):
-            return end_session("compte désactivé", "Ce compte a été désactivé par le gestionnaire.")
+        """Ferme la session d'un compte désactivé, QUEL QUE SOIT son rôle (super-admin compris)."""
+        if current_user.is_authenticated and (request.endpoint or "") not in _SESSION_SKIP \
+                and is_disabled(current_user):
+            message = ("Ce compte a été désactivé." if current_user.is_super_admin
+                       else "Ce compte a été désactivé par le gestionnaire.")
+            return end_session("compte désactivé", message)
+        return None
+
+    # Exécuté AVANT les autres contrôles (2FA, maintenance…) : rien ne doit
+    # pouvoir servir une page à une session désactivée.
+    app.before_request_funcs.setdefault(None, []).insert(0, _logout_disabled)
+
+    @app.before_request
+    def _block_disabled_password_reset():
+        endpoint = request.endpoint or ""
+
+        # 1) Demande de lien : rien n'est envoyé à un compte désactivé (même message affiché).
+        if endpoint == "forgot_password" and request.method == "POST":
+            email = sf.normalize_email(request.form.get("email"))
+            user = User.query.filter_by(email=email).first() if email else None
+            if user and is_disabled(user):
+                log_audit("password_reset_blocked_disabled", success=False,
+                          restaurant_id=user.restaurant_id, user_email=email,
+                          details="compte désactivé : aucun lien envoyé")
+                flash("Si un compte existe avec cet email, un lien de réinitialisation "
+                      "vient de lui être envoyé.", "success")
+                return redirect(url_for("admin_login"))
+            return None
+
+        # 2) Lien reçu avant la désactivation : refusé, sans changer le mot de passe.
+        if endpoint == "reset_password":
+            token = (request.view_args or {}).get("token") or ""
+            try:
+                data = serializer.loads(token, salt="pwd-reset", max_age=7 * 24 * 3600)
+            except (BadSignature, SignatureExpired):
+                return None                      # la route affiche déjà « lien invalide »
+            user = db.session.get(User, data.get("uid")) if isinstance(data, dict) else None
+            if user and is_disabled(user):
+                log_audit("password_reset_blocked_disabled", success=False,
+                          restaurant_id=user.restaurant_id, user_email=user.email,
+                          details="lien de réinitialisation refusé : compte désactivé")
+                flash("Ce lien de réinitialisation est invalide, a expiré, ou a déjà été utilisé.", "error")
+                return redirect(url_for("forgot_password"))
         return None
 
     # ---- validation du nouveau formulaire d'équipe (sans mot de passe)
