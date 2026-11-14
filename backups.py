@@ -176,6 +176,30 @@ def encrypt(blob):
     return _fernet().encrypt(blob)
 
 
+def is_encrypted(blob):
+    """Audit MF-16 : la copie est-elle déjà chiffrée (Fernet) ?"""
+    return bytes(blob[:6]) == FERNET_MAGIC
+
+
+def encrypted_copy(blob):
+    """Copie chiffrée, sans jamais chiffrer deux fois."""
+    return bytes(blob) if is_encrypted(blob) else encrypt(blob)
+
+
+# Audit MF-16 : décompression bornée (anti « bombe gzip »).
+MAX_UNCOMPRESSED_BYTES = _env_int("BACKUP_MAX_UNCOMPRESSED_MB", 500, 10, 4000) * 1024 * 1024
+
+
+def _bounded_gunzip(blob):
+    import io as _io
+    with gzip.GzipFile(fileobj=_io.BytesIO(blob)) as fh:
+        out = fh.read(MAX_UNCOMPRESSED_BYTES + 1)
+    if len(out) > MAX_UNCOMPRESSED_BYTES:
+        raise BackupError(f"Sauvegarde refusée : plus de {MAX_UNCOMPRESSED_BYTES // (1024 * 1024)} Mo "
+                          "une fois décompressée (fichier piégé ou trop volumineux).")
+    return out
+
+
 def to_gzip_bytes(raw):
     """Accepte une sauvegarde chiffrée ou non, et renvoie le gzip en clair."""
     if raw.startswith(GZIP_MAGIC):
@@ -253,7 +277,7 @@ def build_dump():
 def parse_backup(raw):
     """Lit et vérifie une sauvegarde (chiffrée ou non). Ne modifie rien."""
     try:
-        data = json.loads(gzip.decompress(to_gzip_bytes(raw)).decode("utf-8"))
+        data = json.loads(_bounded_gunzip(to_gzip_bytes(raw)).decode("utf-8"))
     except BackupError:
         raise
     except Exception:
@@ -397,7 +421,7 @@ def upload_offsite(backup):
     try:
         key = f"{_prefix()}menuflash_{backup.created_at:%Y%m%d_%H%M%S}_{backup.id}.mfbak"
         _s3_client().put_object(
-            Bucket=_bucket(), Key=key, Body=encrypt(backup.data),
+            Bucket=_bucket(), Key=key, Body=encrypted_copy(backup.data),
             ContentType="application/octet-stream",
             Metadata={"checksum": backup.checksum, "rows": str(backup.rows_count), "kind": backup.kind},
         )
@@ -466,6 +490,8 @@ def _prune_local():
 
 def _do_backup(kind, actor, offsite=True):
     blob, ntables, nrows = build_dump()
+    if encryption_configured():
+        blob = encrypt(blob)          # audit MF-16 : la copie locale n'est jamais stockée en clair
     backup = Backup(kind=kind, created_by=(actor or "système")[:120], size_bytes=len(blob),
                     tables_count=ntables, rows_count=nrows,
                     checksum=hashlib.sha256(blob).hexdigest(), data=blob,
@@ -507,6 +533,10 @@ def is_stale():
 # Branchement
 # ==========================================================================
 def init_backups(app, *, log_audit, super_admin_required):
+
+    if os.environ.get("RENDER") and not encryption_configured():
+        logger.error("BACKUP_ENCRYPTION_KEY n'est pas définie : copies locales EN CLAIR, aucune copie "
+                     "hors site, téléchargement refusé. Ajoutez-la dans Render > Environment.")
 
     with app.app_context():
         try:
@@ -667,12 +697,18 @@ def init_backups(app, *, log_audit, super_admin_required):
     def super_admin_backup_download(backup_id):
         b = Backup.query.get_or_404(backup_id)
         stamp = f"{b.created_at:%Y%m%d_%H%M}"
-        if encryption_configured():
+        if is_encrypted(b.data) or encryption_configured():
             try:
-                body, name = encrypt(b.data), f"menuflash_{stamp}_{b.id}.mfbak"
+                body, name = encrypted_copy(b.data), f"menuflash_{stamp}_{b.id}.mfbak"
             except BackupError as exc:
                 flash(str(exc), "error")
                 return _back()
+        elif os.environ.get("RENDER"):
+            # Audit MF-16 : jamais de copie complète en clair depuis la production.
+            audit("backup_download_refused", f"n°{b.id} : chiffrement non configuré", success=False)
+            flash("Téléchargement refusé : définissez d'abord BACKUP_ENCRYPTION_KEY dans "
+                  "Render > Environment (la sauvegarde contient les données de tous les clients).", "error")
+            return _back()
         else:
             body, name = b.data, f"menuflash_{stamp}_{b.id}.json.gz"
         audit("backup_downloaded", f"n°{b.id} ({'chiffrée' if name.endswith('.mfbak') else 'NON chiffrée'})")
