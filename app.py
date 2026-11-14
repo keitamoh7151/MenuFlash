@@ -141,6 +141,13 @@ if _db_url.startswith("postgres://"):
     _db_url = _db_url.replace("postgres://", "postgresql+psycopg2://", 1)
 elif _db_url.startswith("postgresql://"):
     _db_url = _db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+# Audit MF-19 : sur Render, jamais de repli silencieux sur SQLite (disque effacé
+# à chaque redéploiement = perte des données). Démarrage refusé à la place.
+if os.environ.get("RENDER") and not _db_url.startswith("postgresql+psycopg2://"):
+    raise RuntimeError(
+        "DATABASE_URL absente ou invalide sur Render : démarrage refusé pour ne pas "
+        "enregistrer les données sur un disque temporaire. Dans Render > Environment, "
+        "définissez DATABASE_URL avec l'« Internal Database URL » de votre base PostgreSQL.")
 app.config["SQLALCHEMY_DATABASE_URI"] = _db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
