@@ -350,6 +350,20 @@ def init_security_plus(app, *, limiter, log_audit, owner_required, active_restau
             g.mf_new_device = raw
         return raw
 
+    def is_known_device(user):
+        """Audit MF-10 : le propriétaire de ce compte s'est-il déjà connecté depuis ce navigateur ?
+        Ne crée jamais de cookie (lecture seule)."""
+        raw = request.cookies.get(DEVICE_COOKIE, "")
+        if not user or len(raw) != 32 or not all(c in "0123456789abcdef" for c in raw):
+            return False
+        try:
+            return UserDevice.query.filter_by(user_id=user.id, device_hash=device_hash(raw)).first() is not None
+        except Exception:
+            db.session.rollback()
+            return False
+
+    app.extensions["mf_is_known_device"] = is_known_device
+
     @app.after_request
     def _set_device_cookie(resp):
         raw = getattr(g, "mf_new_device", None)

@@ -119,6 +119,11 @@ class User(UserMixin, db.Model):
         return max(int(delta.total_seconds() // 60) + 1, 1)
 
     def register_failed_login(self):
+        # Audit MF-10 : verrou expiré -> le compteur repart de zéro (sinon un seul
+        # échec suffisait à reverrouiller le compte 15 minutes).
+        if self.locked_until and self.locked_until <= datetime.utcnow():
+            self.failed_login_attempts = 0
+            self.locked_until = None
         self.failed_login_attempts = (self.failed_login_attempts or 0) + 1
         if self.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
             from datetime import timedelta

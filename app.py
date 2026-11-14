@@ -661,6 +661,8 @@ def reset_password(token):
         return render_template("reset_password.html", token=token), 400
 
     user.set_password(new_password)
+    user.failed_login_attempts = 0          # audit MF-10 : la preuve par email débloque le compte
+    user.locked_until = None
     db.session.commit()
     log_audit("password_reset_completed", restaurant_id=user.restaurant_id, user_email=user.email)
 
@@ -1389,6 +1391,25 @@ def submit_review(slug, order_id):
 # --------------------------------------------------------------------------
 # Back-office restaurant (authentifié) — isolation stricte par restaurant_id
 # --------------------------------------------------------------------------
+def _send_lock_notice(user):
+    """Audit MF-10 : prévient le propriétaire que son compte vient d'être verrouillé."""
+    try:
+        link = url_for("forgot_password", _external=True)
+        send_transactional_email(
+            app, user.email,
+            subject="Connexion bloquée temporairement — MenuFlash",
+            body_text=(
+                f"Bonjour,\n\nPlusieurs mots de passe incorrects ont été saisis pour votre compte "
+                f"MenuFlash. Par sécurité, la connexion depuis un NOUVEL appareil est bloquée "
+                f"pendant {LOCKOUT_DURATION_MINUTES} minutes.\n\n"
+                f"Vos appareils habituels (tablette de cuisine, téléphone) continuent de "
+                f"fonctionner normalement.\n\n"
+                f"Si ce n'était pas vous, choisissez dès maintenant un nouveau mot de passe :\n{link}\n\n"
+                f"L'équipe MenuFlash"))
+    except Exception:
+        logger.exception("Email de verrouillage non envoyé")
+
+
 @app.route("/admin/login", methods=["GET", "POST"])
 @limiter.limit("15 per minute;50 per hour", methods=["POST"])
 def admin_login():
@@ -1397,15 +1418,25 @@ def admin_login():
         password = request.form.get("password", "")
         user = User.query.filter_by(email=email).first()
 
+        # Audit MF-10 : réponse identique (message ET temps de calcul) que le compte
+        # existe ou non, soit verrouillé ou non. Un compte verrouillé reste accessible
+        # depuis un appareil déjà connu de son propriétaire.
+        password_ok = bool(user) and user.check_password(password)
+        known_device = False
         if user and user.is_locked:
-            minutes = user.lock_minutes_remaining
-            flash(f"Compte temporairement verrouillé suite à plusieurs échecs de connexion. "
-                  f"Réessayez dans environ {minutes} minute(s).", "error")
-            log_audit("login_blocked_locked", success=False, restaurant_id=user.restaurant_id,
-                       user_email=email, details=f"verrouille encore {minutes} min")
-            return render_template("admin_login.html")
+            checker = app.extensions.get("mf_is_known_device")
+            known_device = bool(checker and checker(user))
+            if not (password_ok and known_device):
+                minutes = user.lock_minutes_remaining
+                log_audit("login_blocked_locked", success=False, restaurant_id=user.restaurant_id,
+                           user_email=email, details=f"verrouille encore {minutes} min"
+                           + (" (appareil connu, mot de passe faux)" if known_device else ""))
+                flash("Identifiants incorrects.", "error")
+                return render_template("admin_login.html")
+            log_audit("login_lock_bypassed_known_device", restaurant_id=user.restaurant_id,
+                       user_email=email, details="compte verrouillé, appareil déjà connu, bon mot de passe")
 
-        if user and user.check_password(password):
+        if user and password_ok:
             user.register_successful_login()
             db.session.commit()
             login_user(user)
@@ -1426,9 +1457,8 @@ def admin_login():
                        details=f"tentative {user.failed_login_attempts}/{MAX_FAILED_LOGIN_ATTEMPTS}"
                                + (" - compte verrouille" if just_locked else ""))
             if just_locked:
-                flash(f"Trop d'échecs : compte verrouillé pendant {LOCKOUT_DURATION_MINUTES} minutes.", "error")
-            else:
-                flash("Identifiants incorrects.", "error")
+                _send_lock_notice(user)
+            flash("Identifiants incorrects.", "error")      # audit MF-10 : même message partout
         else:
             log_audit("login_failed", success=False, user_email=email, details="compte inconnu")
             flash("Identifiants incorrects.", "error")
