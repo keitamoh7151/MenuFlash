@@ -30,7 +30,7 @@
   .mf-ck:hover { border-color: var(--mf-accent); color: var(--mf-accent-dark); }
   .mf-ck-done { border-style: solid; border-color: transparent; background: var(--mf-success-bg); color: var(--mf-success); }
 </style>
-<script>
+<script nonce="{{ csp_nonce() }}">
 (function () {
   var box = document.getElementById("mf-checklist");
   if (!box) return;

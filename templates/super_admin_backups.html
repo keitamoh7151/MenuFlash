@@ -176,7 +176,7 @@
 </div>
 {% endblock %}
 {% block extra_scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
 document.addEventListener("DOMContentLoaded", function () {
   var modal = document.getElementById("restore-modal");
   if (modal) {

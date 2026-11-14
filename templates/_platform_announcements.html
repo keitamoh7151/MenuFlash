@@ -8,7 +8,7 @@
       </div>
     {% endfor %}
   </div>
-  <script>
+  <script nonce="{{ csp_nonce() }}">
   (function () {
     try {
       var hidden = JSON.parse(localStorage.getItem("mf_hidden_ann") || "[]");

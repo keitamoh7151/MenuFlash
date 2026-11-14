@@ -397,7 +397,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
 document.addEventListener("DOMContentLoaded", function () {
   var editItemForm = document.getElementById("edit-item-form");
   document.querySelectorAll(".mf-edit-item-btn").forEach(function (btn) {

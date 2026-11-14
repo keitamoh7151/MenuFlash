@@ -84,7 +84,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
 document.addEventListener("DOMContentLoaded", function () {
   var saveUrl = "{{ url_for('admin_appearance_save') }}";
 

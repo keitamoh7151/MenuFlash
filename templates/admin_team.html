@@ -159,7 +159,7 @@
     .mf-team-actions { width: 100%; justify-content: flex-start; padding-left: 50px; }
   }
 </style>
-<script>
+<script nonce="{{ csp_nonce() }}">
 document.addEventListener("DOMContentLoaded", function () {
   var sudoActive = {{ 'true' if mf_sudo_active else 'false' }};
   var modalEl = document.getElementById("mf-sudo-modal");

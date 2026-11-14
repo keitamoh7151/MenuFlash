@@ -20,11 +20,14 @@
         <button type="button" class="btn btn-outline-secondary btn-sm flex-grow-1 mf-copy-btn"
                 data-copy-text="Codes de secours MenuFlash ({{ email }}) :&#10;{{ codes|join('&#10;') }}">
           <i class="bi bi-clipboard me-1"></i>Copier</button>
-        <button type="button" class="btn btn-outline-secondary btn-sm flex-grow-1" onclick="window.print()">
+        <button type="button" class="btn btn-outline-secondary btn-sm flex-grow-1" id="mf-print-codes">
           <i class="bi bi-printer me-1"></i>Imprimer</button>
       </div>
       <a href="{{ url_for('super_admin_dashboard') }}" class="btn btn-primary w-100 py-2">J'ai noté mes codes, continuer</a>
     </div>
   </div>
 </div>
+<script nonce="{{ csp_nonce() }}">
+  document.getElementById("mf-print-codes").addEventListener("click", function () { window.print(); });
+</script>
 {% endblock %}

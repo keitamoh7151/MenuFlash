@@ -224,6 +224,9 @@ limiter = Limiter(
 )
 shared_counters.check_config()
 limiter.exempt(app.view_functions["static"])
+
+import csp_policy                                  # audit MF-06 : CSP avec jeton par page
+csp_policy.init(app, csrf=csrf, limiter=limiter)
 from security_forms import init_form_security
 init_form_security(app, limiter)
 
@@ -245,14 +248,7 @@ def set_security_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-        "img-src 'self' data: blob:; "
-        "connect-src 'self';"
-    )
+    csp_policy.apply_headers(response)              # audit MF-06 (voir csp_policy.py)
     is_https = request.is_secure or request.headers.get("X-Forwarded-Proto") == "https"
     if is_https or FORCE_HTTPS:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

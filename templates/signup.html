@@ -126,7 +126,7 @@
   <script src="{{ url_for('static', filename='app.js') }}?v=9"></script>
   <script src="{{ url_for('static', filename='forms_security.js') }}?v=1"></script>
   <script src="{{ url_for('static', filename='phone_field.js') }}?v=1"></script>
-  <script>
+  <script nonce="{{ csp_nonce() }}">
     (function () {
       var nameInput = document.getElementById("restaurant-name-input");
       var slugInput = document.getElementById("slug-input");
