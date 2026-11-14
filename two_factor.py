@@ -238,6 +238,17 @@ def mark_verified(user):
 # ==========================================================================
 # Branchement
 # ==========================================================================
+class TwoFactorEmergencyUse(db.Model):
+    """Audit MF-13 : une réinitialisation d'urgence ne sert qu'UNE fois."""
+    __tablename__ = "user_two_factor_emergency"
+    user_id = db.Column(db.Integer, primary_key=True)
+    used_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+EMERGENCY_VAR = "TWO_FACTOR_EMERGENCY_RESET"
+EMERGENCY_NOTICE_KEY = "mf_2fa_emergency_notice"
+
+
 def init_two_factor(app, *, log_audit, limiter=None):
 
     with app.app_context():
@@ -246,6 +257,21 @@ def init_two_factor(app, *, log_audit, limiter=None):
             TwoFactorFailure.__table__.create(db.engine, checkfirst=True)
         except Exception:
             logger.exception("Création de la table user_two_factor impossible")
+
+    # Audit MF-13 : table « usage unique » + nettoyage quand la variable est absente.
+    with app.app_context():
+        try:
+            TwoFactorEmergencyUse.__table__.create(db.engine, checkfirst=True)
+            if os.environ.get(EMERGENCY_VAR, "").strip():
+                logger.error("%s est définie : réinitialisation d'urgence de la 2FA ARMÉE (usage unique). "
+                             "Supprimez la variable dès que possible.", EMERGENCY_VAR)
+            elif TwoFactorEmergencyUse.query.count():
+                # Variable retirée -> une prochaine urgence pourra de nouveau être traitée.
+                TwoFactorEmergencyUse.query.delete()
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+            logger.exception("Table user_two_factor_emergency indisponible")
 
     def audit(action, success=True, details=None, user=None):
         user = user or (current_user if current_user.is_authenticated else None)
@@ -277,16 +303,25 @@ def init_two_factor(app, *, log_audit, limiter=None):
         if (request.endpoint or "") in _OPEN_ENDPOINTS:
             return None
 
-        emergency = os.environ.get("TWO_FACTOR_EMERGENCY_RESET", "").strip().lower()
-        if emergency and emergency == current_user.email.lower():
-            rec = _record(current_user)
-            if rec:
-                db.session.delete(rec)
+        emergency = os.environ.get(EMERGENCY_VAR, "").strip().lower()
+        if emergency:
+            if not session.get(EMERGENCY_NOTICE_KEY):
+                session[EMERGENCY_NOTICE_KEY] = True
+                flash(f"Sécurité : la variable {EMERGENCY_VAR} est encore définie sur Render. "
+                      "Supprimez-la dès que possible.", "error")
+            # Audit MF-13 : usage UNIQUE (enregistré en base), plus jamais à chaque requête.
+            if emergency == current_user.email.lower() and \
+                    db.session.get(TwoFactorEmergencyUse, current_user.id) is None:
+                rec = _record(current_user)
+                if rec:
+                    db.session.delete(rec)
+                db.session.add(TwoFactorEmergencyUse(user_id=current_user.id))
                 db.session.commit()
-                audit("2fa_emergency_reset", details="2FA supprimée via TWO_FACTOR_EMERGENCY_RESET")
-                logger.warning("2FA réinitialisée en urgence pour %s : retirez la variable "
-                               "TWO_FACTOR_EMERGENCY_RESET de Render.", current_user.email)
-            session.pop(SESSION_KEY, None)
+                audit("2fa_emergency_reset", success=False,
+                      details="2FA supprimée via TWO_FACTOR_EMERGENCY_RESET (usage unique)")
+                logger.error("2FA réinitialisée en urgence pour %s : retirez la variable "
+                             "%s de Render.", current_user.email, EMERGENCY_VAR)
+                session.pop(SESSION_KEY, None)
 
         if is_verified():
             return None
