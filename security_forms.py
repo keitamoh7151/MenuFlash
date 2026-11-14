@@ -51,8 +51,8 @@ from flask import request, flash, redirect, url_for, session
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from werkzeug.security import generate_password_hash, check_password_hash
 
-PASSWORD_MIN_LENGTH = 10
-PASSWORD_MAX_LENGTH = 64
+PASSWORD_MIN_LENGTH = 12          # audit MF-11 (ASVS 5.0 : 12 minimum, tous caractères acceptés)
+PASSWORD_MAX_LENGTH = 128
 PASSWORD_HARD_LIMIT = 256          # au-delà, refus immédiat sans hachage
 
 SIGNUP_MIN_SECONDS = 3             # un humain met plus de 3 s à remplir l'inscription
@@ -102,19 +102,16 @@ def password_errors(password, email="", extra_words=()):
     if len(password) > PASSWORD_HARD_LIMIT:
         return [f"Le mot de passe doit contenir au maximum {PASSWORD_MAX_LENGTH} caractères."]
 
+    # Audit MF-11 : longueur seulement. Espaces, accents et ponctuation sont acceptés
+    # (phrases de passe) ; plus de règle « majuscule / chiffre obligatoire ».
+    password = unicodedata.normalize("NFKC", password)
     errors = []
     if not (PASSWORD_MIN_LENGTH <= len(password) <= PASSWORD_MAX_LENGTH):
         errors.append(f"Le mot de passe doit contenir entre {PASSWORD_MIN_LENGTH} et "
-                      f"{PASSWORD_MAX_LENGTH} caractères.")
-    if not re.fullmatch(r"[A-Za-z0-9]*", password):
-        errors.append("Le mot de passe ne doit contenir que des lettres (sans accent) et des "
-                      "chiffres : aucun espace, aucune ponctuation.")
-    if not re.search(r"[A-Z]", password):
-        errors.append("Le mot de passe doit contenir au moins une lettre majuscule.")
-    if not re.search(r"[a-z]", password):
-        errors.append("Le mot de passe doit contenir au moins une lettre minuscule.")
-    if not re.search(r"[0-9]", password):
-        errors.append("Le mot de passe doit contenir au moins un chiffre.")
+                      f"{PASSWORD_MAX_LENGTH} caractères. Astuce : une phrase de plusieurs mots "
+                      f"est facile à retenir et difficile à deviner.")
+    if any(unicodedata.category(ch)[0] == "C" for ch in password):
+        errors.append("Le mot de passe contient un caractère invisible non autorisé.")
     if errors:
         return errors
 

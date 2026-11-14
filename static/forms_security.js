@@ -15,16 +15,12 @@
 (function () {
   "use strict";
 
-  var MIN = 10, MAX = 64;
-  var ALLOWED = /^[A-Za-z0-9]*$/;
+  // Audit MF-11 : tous les caractères sont acceptés (espaces, accents, ponctuation).
+  var MIN = 12, MAX = 128;
+  var ALLOWED = /^[^\u0000-\u001f\u007f]*$/;
   var RULES = [
-    { key: "len",   label: MIN + " à " + MAX + " caractères",
-      test: function (v) { return v.length >= MIN && v.length <= MAX; } },
-    { key: "upper", label: "Une lettre majuscule", test: function (v) { return /[A-Z]/.test(v); } },
-    { key: "lower", label: "Une lettre minuscule", test: function (v) { return /[a-z]/.test(v); } },
-    { key: "digit", label: "Un chiffre",           test: function (v) { return /[0-9]/.test(v); } },
-    { key: "chars", label: "Lettres sans accent et chiffres uniquement (ni espace, ni ponctuation)",
-      test: function (v) { return v.length > 0 && ALLOWED.test(v); } }
+    { key: "len",   label: MIN + " caractères minimum (une phrase de plusieurs mots est idéale)",
+      test: function (v) { return v.length >= MIN && v.length <= MAX; } }
   ];
 
   function el(tag, cls, text) {
