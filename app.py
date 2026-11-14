@@ -2311,6 +2311,10 @@ def _cron_rate_guard():
 app.before_request_funcs.setdefault(None, []).insert(0, _cron_rate_guard)
 
 
+import turnstile_guard                             # audit MF-18 : anti-robot sur les commandes à distance
+turnstile_guard.init(app, log_audit=log_audit, client_ip=get_client_ip)
+
+
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()

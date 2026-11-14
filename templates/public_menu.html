@@ -242,6 +242,13 @@
             </div>
             <p class="small text-secondary mb-0 d-flex gap-2"><i class="bi bi-cash-coin"></i>
               <span data-i18n="tk_payment">Paiement au retrait. Vous pouvez annuler tant que la préparation n'a pas commencé.</span></p>
+            {% if turnstile_site_key %}
+            {# Audit MF-18 : anti-robot (invisible pour la plupart des clients) #}
+            <div class="cf-turnstile mt-3" data-sitekey="{{ turnstile_site_key }}"
+                 data-appearance="interaction-only" data-theme="light"></div>
+            <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer
+                    {% if csp_nonce is defined %}nonce="{{ csp_nonce() }}"{% endif %}></script>
+            {% endif %}
           </div>
           <div class="modal-footer border-0 flex-nowrap">
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="tk_back">Retour</button>

@@ -37,6 +37,7 @@ TICKET_ENDPOINT = "order_ticket"          # ticket imprimé dans un cadre (ticke
 # Versions EXACTES des bibliothèques chargées depuis le CDN (un autre paquet du
 # même CDN ne peut plus être chargé).
 CDN_SCRIPTS = (
+    "https://challenges.cloudflare.com",                 # audit MF-18 (Turnstile)
     "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/",
     "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/",
     "https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/",
@@ -67,7 +68,8 @@ def _frame_ancestors():
 
 def current_policy():
     return ("default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com; "
+            "frame-src 'self' https://challenges.cloudflare.com; "
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
             "img-src 'self' data: blob:; "
@@ -80,6 +82,7 @@ def strict_policy():
     return ("default-src 'self'; "
             f"script-src 'self' 'nonce-{csp_nonce()}' {' '.join(CDN_SCRIPTS)}; "
             "script-src-attr 'none'; "
+            "frame-src 'self' https://challenges.cloudflare.com; "
             f"style-src 'self' 'unsafe-inline' {' '.join(CDN_STYLES)}; "
             f"font-src 'self' {' '.join(CDN_FONTS)}; "
             "img-src 'self' data: blob:; "

@@ -555,6 +555,9 @@
         .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
         .then(function (res) {
           var data = res.data || {};
+          if (!data.ok && window.turnstile) {            // audit MF-18 : nouveau jeton pour le prochain essai
+            try { window.turnstile.reset(); } catch (e) {}
+          }
           if (!data.ok) {
             if (data.locked) {
               showToast(data.error, true);
