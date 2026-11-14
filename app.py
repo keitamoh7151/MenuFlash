@@ -744,6 +744,40 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
 
+# --------------------------------------------------------------------------
+# Audit MF-17 : ouverture sûre des images (anti « bombe de décompression »)
+# --------------------------------------------------------------------------
+MAX_UPLOAD_PIXELS = 40_000_000      # au-delà : refus, sans rien décoder
+MAX_DECODE_PIXELS = 25_000_000      # PNG / WEBP : décodés en taille réelle
+Image.MAX_IMAGE_PIXELS = MAX_UPLOAD_PIXELS
+IMAGE_REJECTED_MESSAGE = ("Image refusée : format non reconnu ou image trop grande "
+                          "(JPG, PNG ou WEBP, 40 mégapixels maximum).")
+
+
+def open_image_safely(stream, target_side):
+    """Ouvre une image téléversée sans risque pour la mémoire du serveur.
+
+    Renvoie l'image chargée, ou None si le fichier est invalide ou trop grand.
+    """
+    try:
+        probe = Image.open(stream)                    # lit seulement l'en-tête
+        width, height = probe.size
+        if width <= 0 or height <= 0 or width * height > MAX_UPLOAD_PIXELS:
+            return None
+        probe.verify()
+        stream.seek(0)
+        img = Image.open(stream)
+        if img.format == "JPEG":
+            img.draft("RGB", (target_side, target_side))   # décodage directement réduit (jamais sous la taille finale)
+        elif width * height > MAX_DECODE_PIXELS:
+            return None
+        img.load()
+        return img
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError,
+            Image.DecompressionBombError, Image.DecompressionBombWarning):
+        return None
+
+
 def save_compressed_image(file_storage, restaurant_slug, restaurant_id=None):
     """
     Recompresse une photo de plat (aplatie en RGB, format WEBP) et
@@ -755,13 +789,13 @@ def save_compressed_image(file_storage, restaurant_slug, restaurant_id=None):
     if not allowed_file(filename):
         return None
 
+    img = open_image_safely(file_storage.stream, MAX_IMAGE_SIDE)   # audit MF-17
+    if img is None:
+        return None
     try:
-        img = Image.open(file_storage.stream)
-        img.verify()
-        file_storage.stream.seek(0)
-        img = ImageOps.exif_transpose(Image.open(file_storage.stream)).convert("RGB")
+        img = ImageOps.exif_transpose(img).convert("RGB")
         img.info = {}   # retire les informations cachées (position GPS, téléphone, date)
-    except (UnidentifiedImageError, OSError, ValueError):
+    except (OSError, ValueError):
         return None
 
     img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
@@ -782,11 +816,11 @@ def save_logo_image(file_storage, restaurant_slug, restaurant_id=None):
     if not allowed_file(filename):
         return None
 
+    img = open_image_safely(file_storage.stream, MAX_LOGO_SIDE)    # audit MF-17
+    if img is None:
+        return None
     try:
-        img = Image.open(file_storage.stream)
-        img.verify()
-        file_storage.stream.seek(0)
-        img = ImageOps.exif_transpose(Image.open(file_storage.stream))
+        img = ImageOps.exif_transpose(img)
         has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
         img = img.convert("RGBA") if has_alpha else img.convert("RGB")
         img.info = {}   # retire les informations cachées (position GPS, téléphone, date)
@@ -1525,6 +1559,8 @@ def add_item():
     file = request.files.get("photo")
     if file and file.filename:
         photo_url = save_compressed_image(file, restaurant.slug, restaurant.id)
+        if not photo_url:
+            flash(IMAGE_REJECTED_MESSAGE + " Le plat est ajouté sans photo.", "error")
 
     last = db.session.query(db.func.max(MenuItem.position)).filter_by(
         category_id=category.id).scalar() or 0
@@ -1584,6 +1620,8 @@ def edit_item(item_id):
             delete_stored_image(item.photo_url)
             item.photo_url = photo_url
             changes.append("photo mise à jour")
+        else:
+            flash(IMAGE_REJECTED_MESSAGE + " L'ancienne photo est conservée.", "error")
 
     item.name = new_name
     item.description = new_description
@@ -1721,7 +1759,7 @@ def admin_appearance_logo():
 
     logo_url = save_logo_image(file, restaurant.slug, restaurant.id)
     if not logo_url:
-        flash("Format d'image non reconnu. Utilisez un fichier JPG, PNG ou WEBP.", "error")
+        flash(IMAGE_REJECTED_MESSAGE, "error")
         return redirect(url_for("admin_appearance"))
 
     delete_stored_image(restaurant.logo_url)
