@@ -86,6 +86,37 @@ class UserTwoFactor(db.Model):
         return len([h for h in (self.recovery_hashes or "").split("\n") if h])
 
 
+class TwoFactorFailure(db.Model):
+    """Audit MF-04 : codes 2FA faux, comptés EN BASE par compte (et non dans le cookie)."""
+    __tablename__ = "user_two_factor_failures"
+    user_id = db.Column(db.Integer, primary_key=True)
+    count = db.Column(db.Integer, nullable=False, default=0)
+    window_start = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+FAILURE_WINDOW = timedelta(minutes=15)      # sans erreur pendant 15 min : le compteur repart à zéro
+
+
+def register_failure(user_id, now=None):
+    """Ajoute un échec et renvoie le total sur la fenêtre en cours (sans commit)."""
+    now = now or datetime.utcnow()
+    row = db.session.get(TwoFactorFailure, user_id)
+    if row is None:
+        row = TwoFactorFailure(user_id=user_id, count=0, window_start=now)
+        db.session.add(row)
+    elif now - row.window_start > FAILURE_WINDOW:
+        row.count, row.window_start = 0, now
+    row.count += 1
+    return row.count
+
+
+def clear_failures(user_id):
+    """Remet le compteur à zéro (sans commit)."""
+    row = db.session.get(TwoFactorFailure, user_id)
+    if row is not None:
+        db.session.delete(row)
+
+
 # ==========================================================================
 # TOTP (RFC 6238) — sans dépendance externe
 # ==========================================================================
@@ -212,6 +243,7 @@ def init_two_factor(app, *, log_audit, limiter=None):
     with app.app_context():
         try:
             UserTwoFactor.__table__.create(db.engine, checkfirst=True)
+            TwoFactorFailure.__table__.create(db.engine, checkfirst=True)
         except Exception:
             logger.exception("Création de la table user_two_factor impossible")
 
@@ -337,6 +369,14 @@ def init_two_factor(app, *, log_audit, limiter=None):
         if is_verified():
             return _after_verified()
 
+        if getattr(current_user, "is_locked", False):
+            audit("2fa_blocked_locked", success=False, details="compte verrouillé : code refusé")
+            minutes = current_user.lock_minutes_remaining
+            logout_user()
+            session.clear()
+            flash(f"Compte verrouillé : réessayez dans {minutes} minute(s).", "error")
+            return redirect(url_for("admin_login"))
+
         if request.method == "POST":
             mode = request.form.get("mode", "code")
             user = current_user._get_current_object()
@@ -361,15 +401,20 @@ def init_two_factor(app, *, log_audit, limiter=None):
                     ok = True
 
             if ok:
+                clear_failures(user.id)
+                db.session.commit()
                 mark_verified(user)
                 audit("2fa_verified", details="mode " + mode)
                 return _after_verified()
 
-            fails = session.get(FAIL_KEY, 0) + 1
-            session[FAIL_KEY] = fails
+            # Audit MF-04 : compteur en base (le cookie ne peut plus le remettre à zéro).
+            fails = register_failure(user.id)
+            db.session.commit()
             audit("2fa_failed", success=False, details=f"tentative {fails}/{MAX_FAILURES} ({mode})")
             if fails >= MAX_FAILURES:
                 user.locked_until = datetime.utcnow() + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+                user.rotate_security_stamp()          # toutes les sessions et cookies existants tombent
+                clear_failures(user.id)
                 db.session.commit()
                 audit("2fa_locked", success=False,
                       details=f"compte verrouillé {LOCKOUT_DURATION_MINUTES} min après {fails} codes faux")
