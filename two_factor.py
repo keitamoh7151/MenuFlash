@@ -418,7 +418,8 @@ def init_two_factor(app, *, log_audit, limiter=None):
             if step is None:
                 audit("2fa_setup_failed", success=False, details="code d'activation incorrect")
                 flash("Code incorrect. Vérifiez l'heure de votre téléphone et saisissez le code affiché.", "error")
-                return redirect(url_for("two_factor_setup", **request.args))
+                return redirect(url_for("two_factor_setup",      # audit lot 3 : seul « reconfigurer » est repris
+                                        **{k: v for k, v in request.args.items() if k == "reconfigurer"}))
             codes = new_recovery_codes()
             if rec.enabled:
                 rec.secret_enc = session.pop("mf_2fa_pending")

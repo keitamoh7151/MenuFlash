@@ -50,6 +50,7 @@ from flask import (abort, flash, jsonify, redirect, render_template, request,
 from flask_login import current_user
 
 from mailer import send_transactional_email
+from safe_redirect import safe_back                 # audit lot 3
 from models import Restaurant, RestaurantAccess, User, db
 from super_admin import (PLAN_LABELS, PLATFORM_SLUG, RestaurantAdminMeta, _meta)
 
@@ -236,7 +237,7 @@ def init_sa_controls(app, *, super_admin_required, log_audit):
     @app.route("/super-admin/clients/actions-groupees", methods=["POST"])
     @super_admin_required
     def super_admin_bulk_actions():
-        back = redirect(request.referrer or url_for("super_admin_clients"))
+        back = safe_back(url_for("super_admin_clients"))
         ids = []
         for raw in request.form.getlist("ids")[:MAX_BULK]:
             try:
@@ -410,7 +411,7 @@ def init_sa_controls(app, *, super_admin_required, log_audit):
                 if _wants_json():
                     return jsonify(ok=False, error=msg), 403
                 flash(msg, "error")
-                return redirect(request.referrer or url_for("admin_dashboard"))
+                return safe_back(url_for("admin_dashboard"))
         return None
 
     # ------------------------------------------------------------------

@@ -304,6 +304,8 @@ def init_plans(app, *, super_admin_required, active_restaurant, log_audit=None):
         @wraps(original_staff_add)
         def admin_team_add(*args, **kwargs):
             restaurant = active_restaurant()
+            if restaurant is None or not current_user.is_authenticated:      # audit lot 3 : visiteur non connecté
+                return original_staff_add(*args, **kwargs)
             limit = plan_limit(restaurant, "max_staff")
             count = User.query.filter_by(restaurant_id=restaurant.id, role="staff").count()
             if count >= limit:
@@ -318,6 +320,8 @@ def init_plans(app, *, super_admin_required, active_restaurant, log_audit=None):
         @wraps(original_add_item)
         def add_item(*args, **kwargs):
             restaurant = active_restaurant()
+            if restaurant is None or not current_user.is_authenticated:      # audit lot 3 : visiteur non connecté
+                return original_add_item(*args, **kwargs)
             limit = plan_limit(restaurant, "max_menu_items")
             count = MenuItem.query.filter_by(restaurant_id=restaurant.id).count()
             if count >= limit:

@@ -79,6 +79,7 @@ from pdf_utils import make_table_tent_pdf
 from stats_utils import build_dashboard_stats, top_selling_items
 from i18n import TRANSLATIONS
 import realtime
+from safe_redirect import safe_back                 # audit lot 3
 from mailer import init_mailer, send_transactional_email
 from super_admin import init_super_admin, get_trial_days
 from media_store import StoredImage, ensure_media_table, store_image, delete_stored_image
@@ -120,6 +121,21 @@ RESERVED_SLUGS = {
 }
 
 app = Flask(__name__)
+
+# Audit lot 3 : un numéro géant dans une adresse (ex. /media/99999999999999999999) faisait déborder la
+# base de données (erreur 500, enregistrée avec sa trace). Au-delà de 2 147 483 647 : page « introuvable ».
+from werkzeug.routing import IntegerConverter as _IntegerConverter, ValidationError as _ValidationError
+
+
+class _BoundedIntConverter(_IntegerConverter):
+    def to_python(self, value):
+        number = int(value)
+        if number > 2147483647:
+            raise _ValidationError()
+        return number
+
+
+app.url_map.converters["int"] = _BoundedIntConverter
 logger = logging.getLogger("menuflash")
 
 # --------------------------------------------------------------------------
@@ -379,6 +395,23 @@ def safe_int(raw_value, default=None, min_value=None, max_value=None):
     if max_value is not None:
         value = min(value, max_value)
     return value
+
+
+def _clean_id_list(raw, limit=500):
+    """Audit lot 3 : liste d'identifiants entiers valides (1 à 2 147 483 647), sans doublon, 500 au maximum."""
+    out = []
+    if not isinstance(raw, list):
+        return out
+    for value in raw[:limit]:
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            continue
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 < number <= 2147483647 and number not in out:
+            out.append(number)
+    return out
 
 
 def get_client_ip():
@@ -698,12 +731,33 @@ def resend_verification_email():
         log_audit("email_verification_resent", restaurant_id=current_user.restaurant_id,
                    user_email=current_user.email)
         flash("Un nouveau lien de confirmation a été envoyé à votre adresse email.", "success")
-    return redirect(request.referrer or url_for("admin_dashboard"))
+    return safe_back(url_for("admin_dashboard"))
 
 
 # --------------------------------------------------------------------------
 # SÉCURITÉ — mot de passe oublié / réinitialisation
 # --------------------------------------------------------------------------
+def _send_reset_email_in_background(user):
+    """Audit lot 3 : l'email part en arrière-plan. Avant, la réponse prenait ~300 ms de plus quand le compte
+    existait (appel au service d'envoi) : on pouvait deviner quelles adresses ont un compte."""
+    import threading
+    token = generate_security_token(user, salt="pwd-reset")
+    link = url_for("reset_password", token=token, _external=True)
+    to = user.email
+    body = (f"Bonjour,\n\nVous avez demandé à réinitialiser votre mot de passe. "
+            f"Ce lien est valable 1 heure et ne peut être utilisé qu'une seule "
+            f"fois :\n{link}\n\nSi vous n'êtes pas à l'origine de cette demande, "
+            f"ignorez ce message : votre mot de passe actuel reste inchangé.\n\n"
+            f"L'équipe MenuFlash")
+
+    def run():
+        try:
+            send_transactional_email(app, to, "Réinitialisation de votre mot de passe — MenuFlash", body)
+        except Exception:
+            logger.exception("Email de réinitialisation non envoyé")
+    threading.Thread(target=run, daemon=True).start()
+
+
 @app.route("/admin/mot-de-passe-oublie", methods=["GET", "POST"])
 @limiter.limit("5 per hour", methods=["POST"])
 def forgot_password():
@@ -713,7 +767,9 @@ def forgot_password():
     email = request.form.get("email", "").strip().lower()[:120]
     user = User.query.filter_by(email=email).first()
     if user:
-        send_password_reset_email(user)
+        import email_budget
+        if email_budget.allow("forgot", email, 3, 3600):          # audit lot 3 : 3 emails par heure et par compte
+            _send_reset_email_in_background(user)
         log_audit("password_reset_requested", restaurant_id=user.restaurant_id, user_email=email)
     else:
         log_audit("password_reset_requested", success=False, user_email=email,
@@ -1049,8 +1105,14 @@ def _is_visible_to_client(order, now=None):
 
 
 def _parse_requested_items(restaurant):
-    available_items = MenuItem.query.filter_by(
-        restaurant_id=restaurant.id, is_available=True).all()
+    # Audit lot 3 : un plat dont la catégorie est EN PAUSE (mode rush) n'est plus commandable, même par
+    # une page restée ouverte ou une requête fabriquée (la pause n'agissait que sur l'affichage).
+    available_items = (MenuItem.query
+                       .join(MenuCategory, MenuCategory.id == MenuItem.category_id)
+                       .filter(MenuItem.restaurant_id == restaurant.id,
+                               MenuItem.is_available.is_(True),
+                               MenuCategory.is_paused.isnot(True))
+                       .all())
     items_by_id = {str(mi.id): mi for mi in available_items}
 
     items_to_order = []
@@ -1657,8 +1719,8 @@ def toggle_category_pause(category_id):
 @owner_required
 def reorder_categories():
     restaurant_id = active_restaurant_id()
-    data = request.get_json(silent=True) or {}
-    order = data.get("order", [])
+    data = request.get_json(silent=True)
+    order = _clean_id_list(data.get("order") if isinstance(data, dict) else None)    # audit lot 3
     for index, cat_id in enumerate(order):
         MenuCategory.query.filter_by(
             id=cat_id, restaurant_id=restaurant_id
@@ -1671,8 +1733,8 @@ def reorder_categories():
 @owner_required
 def reorder_items():
     restaurant_id = active_restaurant_id()
-    data = request.get_json(silent=True) or {}
-    order = data.get("order", [])
+    data = request.get_json(silent=True)
+    order = _clean_id_list(data.get("order") if isinstance(data, dict) else None)    # audit lot 3
     for index, item_id in enumerate(order):
         MenuItem.query.filter_by(
             id=item_id, restaurant_id=restaurant_id
@@ -2317,6 +2379,37 @@ turnstile_guard.init(app, log_audit=log_audit, client_ip=get_client_ip)
 
 import qr_access_guard                           # audit IDOR-01 : QR de table réservés au gérant
 qr_access_guard.init(app, log_audit=log_audit)
+
+
+# Audit lot 3 : valeur numérique hors limites envoyée par un formulaire -> réponse 400 propre.
+import sqlalchemy.exc as _sa_exc
+
+
+@app.errorhandler(OverflowError)
+@app.errorhandler(_sa_exc.DataError)
+def _out_of_range_value(error):
+    db.session.rollback()
+    wants_json = (request.headers.get("X-Requested-With") == "fetch" or request.is_json
+                  or "application/json" in (request.headers.get("Accept") or ""))
+    if wants_json:
+        return jsonify(ok=False, error="Valeur invalide."), 400
+    return "Valeur invalide.", 400
+
+
+# Audit lot 3 : une page réservée à un compte connecté (ou le suivi d'une commande) n'est jamais conservée
+# par le navigateur : après « Déconnexion », le bouton « Retour » ne réaffiche plus de données (poste partagé).
+_NO_STORE_ENDPOINTS = {"order_status", "order_status_json", "orders_bulk_status", "takeaway_public"}
+
+
+@app.after_request
+def _no_store_for_private_pages(response):
+    try:
+        private = current_user.is_authenticated or request.endpoint in _NO_STORE_ENDPOINTS
+        if private and request.endpoint not in ("static", "media") and "Cache-Control" not in response.headers:
+            response.headers["Cache-Control"] = "private, no-store"
+    except Exception:
+        pass
+    return response
 
 
 if __name__ == "__main__":

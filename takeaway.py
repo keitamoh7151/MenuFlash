@@ -38,6 +38,7 @@ from flask import flash, g, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
 
 from mailer import send_transactional_email
+from safe_redirect import safe_back                 # audit lot 3
 from werkzeug.datastructures import ImmutableMultiDict
 
 from models import Order, QRCode, Restaurant, db
@@ -88,6 +89,20 @@ def takeaway_info_map(order_ids):
     rows = TakeawayOrder.query.filter(TakeawayOrder.order_id.in_(ids)).all()
     return {r.order_id: {"name": r.customer_name, "phone": r.customer_phone,
                          "pickup": r.pickup_at, "pickup_type": r.pickup_type} for r in rows}
+
+
+def _customer_email_allowed(address):
+    """Audit lot 3 : l'adresse est saisie par un visiteur anonyme. Au plus 6 emails par jour et par adresse
+    (confirmation + « prête » de 3 commandes), et EMAIL_CUSTOMER_DAILY_CAP par jour pour toute la plateforme
+    (150 par défaut) : le quota du service d'envoi reste disponible pour les réinitialisations de mot de passe."""
+    import os as _os
+    import email_budget
+    try:
+        cap = max(10, int(_os.environ.get("EMAIL_CUSTOMER_DAILY_CAP", "150")))
+    except ValueError:
+        cap = 150
+    return (email_budget.allow("cust", address, 6, 86400)
+            and email_budget.allow("cust-all", "plateforme", cap, 86400))
 
 
 def resolve_table(restaurant_id, qr_id=None, label=None):
@@ -158,7 +173,7 @@ def _fail(message, code=400):
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify({"ok": False, "error": message}), code
     flash(message, "error")
-    return redirect(request.referrer or "/")
+    return safe_back("/")
 
 
 def _slot_bounds(pickup, slot_minutes):
@@ -381,7 +396,7 @@ def init_takeaway(app, *, owner_required, active_restaurant, order_hooks):
         db.session.add(row)
         db.session.commit()
         ref = ensure_reference(order) or f"#{order.id}"
-        if data["email"]:
+        if data["email"] and _customer_email_allowed(data["email"]):
             try:
                 link = url_for("order_status", slug=data["restaurant"].slug, order_id=order.id, _external=True)
                 quand = "dès que possible" if data["kind"] == "asap" else f"{data['pickup']:%d/%m/%Y à %H:%M}"
@@ -410,7 +425,8 @@ def init_takeaway(app, *, owner_required, active_restaurant, order_hooks):
         try:
             t = db.session.get(TakeawayOrder, order_id)
             o = db.session.get(Order, order_id)
-            if t and o and o.status == "prete" and t.customer_email and not t.ready_sent:
+            if t and o and o.status == "prete" and t.customer_email and not t.ready_sent \
+                    and _customer_email_allowed(t.customer_email):
                 ref = get_reference(o.id) or f"#{o.id}"
                 t.ready_sent = send_transactional_email(
                     app, t.customer_email, f"Commande {ref} prête - {o.restaurant.name}",

@@ -172,6 +172,11 @@ def init_order_edit(app, *, limiter=None):
                 return "Ce restaurant n'accepte pas de commandes en ligne pour le moment."
         except Exception:
             db.session.rollback()
+        if menu_item is not None:                                       # audit lot 3 : catégorie en pause
+            from models import MenuCategory
+            _category = db.session.get(MenuCategory, menu_item.category_id)
+            if _category is not None and _category.is_paused:
+                return "Cette catégorie est momentanément indisponible."
         if menu_item is None or not menu_item.is_available:
             return "Ce plat n'est plus disponible : vous ne pouvez plus en ajouter."
         if int(menu_item.price or 0) != int(line.item_price or 0):
