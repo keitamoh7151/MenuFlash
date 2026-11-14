@@ -31,7 +31,7 @@
         {% else %}
           <a href="{{ url_for('two_factor_verify', mode='recovery') }}">Téléphone perdu ? Code de secours</a>
         {% endif %}
-        <a href="{{ url_for('admin_logout') }}" class="text-secondary">Se déconnecter</a>
+        <form method="post" action="{{ url_for('admin_logout') }}" class="d-inline m-0"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-link p-0 align-baseline text-secondary">Se déconnecter</button></form>
       </div>
     </div>
   </div>

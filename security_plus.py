@@ -922,6 +922,10 @@ def init_security_plus(app, *, limiter, log_audit, owner_required, active_restau
             continue
         view = limiter.limit(per_client, key_func=client_key, methods=["POST"])(view)
         view = limiter.limit(ORDER_LIMIT_PER_IP, key_func=ip_key, methods=["POST"])(view)
+        # Audit MF-18 : plafond global, tous restaurants confondus (une même adresse ne peut
+        # plus inonder plusieurs restaurants). Réglable : ORDER_LIMIT_GLOBAL_IP.
+        view = limiter.limit(os.environ.get("ORDER_LIMIT_GLOBAL_IP", "150 per 10 minutes"),
+                             key_func=lambda: f"order-ip-global:{client_ip()}", methods=["POST"])(view)
         app.view_functions[endpoint] = view
 
     @app.before_request

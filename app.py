@@ -59,7 +59,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 import qrcode
-from flask import (Flask, render_template, redirect, url_for, request,
+from flask import (render_template_string, Flask, render_template, redirect, url_for, request,
                     flash, send_file, abort, jsonify, Response, session)
 from flask_login import (LoginManager, login_user, logout_user,
                           login_required, current_user)
@@ -209,6 +209,14 @@ init_mailer(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "admin_login"
 
+# Audit MF-21 : rotation de FLASK_SECRET_KEY sans déconnecter tout le monde.
+# Mettre l'ANCIENNE clé dans FLASK_SECRET_KEY_FALLBACKS (séparées par des virgules).
+app.config["SECRET_KEY_FALLBACKS"] = [k.strip() for k in
+                                      os.environ.get("FLASK_SECRET_KEY_FALLBACKS", "").split(",") if k.strip()]
+
+import session_crypto                              # audit MF-23 : cookie de session chiffré
+session_crypto.install(app)
+
 csrf = CSRFProtect(app)
 
 import shared_counters                     # audit MF-08 : compteurs dans Redis (Render Key Value)
@@ -293,8 +301,9 @@ def active_restaurant():
         }
         if rid in allowed_ids:
             r = Restaurant.query.get(rid)
-            if r:
+            if r and (r.is_active or r.id == current_user.restaurant_id):
                 return r
+        session.pop("active_restaurant_id", None)     # audit MF-25 : suspendu ou retiré
     return current_user.restaurant
 
 
@@ -382,20 +391,69 @@ def get_client_ip():
     return (request.remote_addr or "unknown")[:64]
 
 
+def _mask_email(email):
+    email = str(email or "")
+    local, _, domain = email.partition("@")
+    return (local[:1] + "***@" + domain)[:120] if domain else ("***" if email else "")
+
+
+# Audit MF-27 : actions qui déclenchent un email d'alerte aux administrateurs.
+_CRITICAL_ACTIONS = {"2fa_locked", "2fa_emergency_reset", "security_not_me", "backup_restored",
+                     "backup_restore_failed", "sa_admin_disabled", "sa_email_changed",
+                     "sa_admin_accepted"}
+_alert_sent = {}
+
+
+def _send_critical_alert(action, user_email, details):
+    import threading
+    import time as _time
+    now = _time.monotonic()
+    key = (action, user_email)
+    if now - _alert_sent.get(key, -1e9) < 600:          # 1 alerte / 10 min pour le même événement
+        return
+    _alert_sent[key] = now
+    ip = get_client_ip()
+
+    def run():
+        with app.app_context():
+            try:
+                from security_plus import StaffMeta
+                for u in User.query.filter_by(is_super_admin=True).all():
+                    meta = db.session.get(StaffMeta, u.id)
+                    if meta and meta.disabled_at:
+                        continue
+                    send_transactional_email(
+                        app, u.email, f"[MenuFlash] Alerte de sécurité : {action}",
+                        f"Bonjour,\n\nÉvénement de sécurité enregistré :\n\n  • Action : {action}\n"
+                        f"  • Compte : {user_email or '-'}\n  • Détails : {details or '-'}\n"
+                        f"  • Adresse IP : {ip}\n\nConsultez le journal de sécurité du panel.\n\n"
+                        f"L'équipe MenuFlash")
+            except Exception:
+                logger.exception("Alerte de sécurité non envoyée (%s)", action)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def log_audit(action, success=True, restaurant_id=None, user_email=None, details=None):
+    values = dict(restaurant_id=restaurant_id, user_email=(user_email or None) and str(user_email)[:120],
+                  action=str(action)[:40], success=bool(success), ip_address=get_client_ip(),
+                  details=(details or "")[:300], created_at=datetime.utcnow())
     try:
-        db.session.add(AuditLog(
-            restaurant_id=restaurant_id,
-            user_email=user_email,
-            action=action,
-            success=success,
-            ip_address=get_client_ip(),
-            details=(details or "")[:300],
-        ))
-        db.session.commit()
+        if db.engine.dialect.name == "postgresql":
+            # Audit MF-27 : transaction SÉPARÉE. Écrire une ligne de journal ne valide plus
+            # les modifications en cours de la page (elles restent annulables).
+            with db.engine.begin() as conn:
+                conn.execute(AuditLog.__table__.insert().values(**values))
+        else:                                  # SQLite (local) : une seule écriture à la fois
+            db.session.add(AuditLog(**values))
+            db.session.commit()
     except Exception:
         db.session.rollback()
         logger.exception("Échec d'écriture du journal d'audit (action=%s)", action)
+    if values["action"] in _CRITICAL_ACTIONS:
+        try:
+            _send_critical_alert(values["action"], values["user_email"], values["details"])
+        except Exception:
+            logger.exception("Alerte de sécurité impossible")
 
 
 def _token_serializer():
@@ -595,8 +653,11 @@ def admin_restaurants_switch():
         flash("Vous n'avez pas accès à ce restaurant.", "error")
         return redirect(url_for("admin_dashboard"))
 
-    session["active_restaurant_id"] = target_id
     r = Restaurant.query.get(target_id)
+    if r is None or (not r.is_active and target_id != current_user.restaurant_id):   # audit MF-25
+        flash("Ce restaurant est suspendu : contactez l'équipe MenuFlash.", "error")
+        return redirect(url_for("admin_dashboard"))
+    session["active_restaurant_id"] = target_id
     log_audit("restaurant_switched", restaurant_id=target_id, user_email=current_user.email,
                details=f"Bascule vers « {r.name if r else target_id} ».")
     return redirect(url_for("admin_dashboard"))
@@ -1483,19 +1544,35 @@ def admin_login():
                 _send_lock_notice(user)
             flash("Identifiants incorrects.", "error")      # audit MF-10 : même message partout
         else:
-            log_audit("login_failed", success=False, user_email=email, details="compte inconnu")
+            log_audit("login_failed", success=False, user_email=_mask_email(email),      # audit MF-27
+                      details="compte inconnu")
             flash("Identifiants incorrects.", "error")
 
     return render_template("admin_login.html")
 
 
-@app.route("/admin/logout")
+@app.route("/admin/logout", methods=["GET", "POST"])
 @login_required
 def admin_logout():
+    # Audit MF-22 : un lien (GET) ne déconnecte plus ; il affiche un bouton de confirmation.
+    if request.method != "POST":
+        return render_template_string(_LOGOUT_CONFIRM_PAGE)
+    origin = request.headers.get("Origin")
+    if origin and origin.rstrip("/") != request.host_url.rstrip("/"):
+        abort(403)
     log_audit("logout", restaurant_id=current_user.restaurant_id, user_email=current_user.email)
-    session.pop("active_restaurant_id", None)
     logout_user()
+    session.clear()                                   # plus aucune donnée de l'ancienne session
     return redirect(url_for("admin_login"))
+
+
+_LOGOUT_CONFIRM_PAGE = """{% extends "base.html" %}{% block title %}Déconnexion{% endblock %}
+{% block content %}<div class="container py-5 text-center" style="max-width:420px">
+<h1 class="h5 mb-3">Se déconnecter de MenuFlash ?</h1>
+<form method="post" action="{{ url_for('admin_logout') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<button type="submit" class="btn btn-primary w-100">Se déconnecter</button></form>
+<a href="{{ url_for('admin_login') }}" class="d-block small mt-3">Annuler</a></div>{% endblock %}"""
 
 
 @app.route("/admin")
@@ -2215,12 +2292,32 @@ init_url_shield(app, log_audit=log_audit)
 from hardening import init_hardening
 init_hardening(app, log_audit=log_audit)
 
+# Audit MF-28 : la sauvegarde planifiée a sa propre limite (10 appels par heure et par IP).
+# Placée AVANT tous les autres contrôles : backups.py traite cette adresse très tôt.
+from limits import parse as _parse_limit
+_CRON_LIMIT = _parse_limit("10/hour")
+
+
+def _cron_rate_guard():
+    if request.path == "/cron/sauvegarde":
+        try:
+            if not limiter.limiter.hit(_CRON_LIMIT, "cron-sauvegarde", get_remote_address()):
+                return jsonify(ok=False, error="too_many_requests"), 429
+        except Exception:
+            logger.exception("Limite de la sauvegarde planifiée indisponible")
+    return None
+
+
+app.before_request_funcs.setdefault(None, []).insert(0, _cron_rate_guard)
+
+
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
         _ensure_schema_migrations()
         _ensure_security_defaults()
-    app.run(debug=True, port=5000, host="0.0.0.0", threaded=True)
+    # Audit MF-28 : accessible uniquement depuis ce PC ; débogueur seulement si FLASK_DEBUG=1.
+    app.run(debug=os.environ.get("FLASK_DEBUG") == "1", port=5000, host="127.0.0.1", threaded=True)
 
 
 

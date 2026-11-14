@@ -1,0 +1,30 @@
+# Sauvegarde quotidienne de MenuFlash Mini, déclenchée depuis GitHub
+# (indispensable sur le plan gratuit de Render, où le service s'endort).
+#
+# À configurer UNE fois dans GitHub > Settings > Secrets and variables > Actions :
+#   APP_URL            ex : https://menuflash-mbzh.onrender.com   (sans / final)
+#   BACKUP_CRON_TOKEN  le même jeton que la variable BACKUP_CRON_TOKEN de Render
+name: Sauvegarde quotidienne
+
+on:
+  schedule:
+    - cron: "0 3 * * *"     # tous les jours à 03:00 UTC (03:00 à Bamako)
+  workflow_dispatch:         # bouton "Run workflow" pour un lancement manuel
+
+jobs:
+  sauvegarde:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Réveiller le service Render
+        run: curl --silent --output /dev/null --max-time 120 --retry 3 --retry-delay 20 "${{ secrets.APP_URL }}/" || true
+
+      - name: Lancer la sauvegarde
+        run: |
+          response=$(curl --silent --show-error --fail-with-body --max-time 300 \
+            --retry 3 --retry-delay 30 --retry-all-errors \
+            -H "X-Backup-Token: ${{ secrets.BACKUP_CRON_TOKEN }}" \
+            "${{ secrets.APP_URL }}/cron/sauvegarde")
+          echo "$response"
+          echo "$response" | grep -q '"ok":true'
+          echo "$response" | grep -q '"offsite":"ok"' || echo "::warning::Sauvegarde faite, mais la copie hors site n'a pas été envoyée."

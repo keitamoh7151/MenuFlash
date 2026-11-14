@@ -80,6 +80,11 @@ RULES = {
 }
 LANDING = {"support": "super_admin_clients_health", "finance": "super_admin_dashboard"}
 
+# Audit MF-24 : pages /admin… autorisées à tous (son propre compte uniquement).
+_SELF_SERVICE = {"admin_login", "admin_logout", "change_password", "forgot_password", "reset_password",
+                 "two_factor_setup", "two_factor_verify", "verify_email", "resend_verification_email",
+                 "static", "media"}
+
 
 class StaffRole(db.Model):
     __tablename__ = "staff_roles"
@@ -154,6 +159,17 @@ def init_sa_roles(app, *, super_admin_required, log_audit, limiter=None):
             return None
         endpoint = request.endpoint or ""
         if not endpoint.startswith("super_admin"):
+            # Audit MF-24 : un rôle limité n'accède ni aux pages de gestion d'un restaurant
+            # (/admin…) ni au suivi des commandes des clients, sauf son propre compte.
+            path = request.path or ""
+            if (path.startswith("/admin") and endpoint not in _SELF_SERVICE) or \
+                    (path.startswith("/m/") and "/commande/" in path):
+                role = role_of(current_user)
+                if role != "admin":
+                    audit("sa_role_denied", f"{role} -> {endpoint or path} {request.method}", success=False)
+                    return render_template("sa_forbidden.html", role=role,
+                                           role_label=ROLES.get(role, ("Aucun rôle",))[0],
+                                           landing=LANDING.get(role)), 403
             return None
         role = role_of(current_user)
         if role == "admin":

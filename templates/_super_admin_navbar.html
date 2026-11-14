@@ -92,7 +92,7 @@
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="{{ url_for('account_email') }}"><i class="bi bi-envelope me-2"></i>Adresse email</a></li>
             <li><a class="dropdown-item" href="{{ url_for('change_password') }}"><i class="bi bi-key me-2"></i>Mot de passe</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('admin_logout') }}"><i class="bi bi-box-arrow-right me-2"></i>Déconnexion</a></li>
+            <li><form method="post" action="{{ url_for('admin_logout') }}" class="d-inline m-0"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="dropdown-item"><i class="bi bi-box-arrow-right me-2"></i>Déconnexion</button></form></li>
           </ul>
         </div>
       </div>

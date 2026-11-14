@@ -170,10 +170,44 @@ def qr_data_uri(text):
 # ==========================================================================
 # Chiffrement de la clé secrète et codes de secours
 # ==========================================================================
-def _fernet(app):
+def _legacy_fernet(secret):
     from cryptography.fernet import Fernet
-    raw = hashlib.sha256(b"menuflash-2fa:" + app.config["SECRET_KEY"].encode()).digest()
+    raw = hashlib.sha256(b"menuflash-2fa:" + str(secret).encode()).digest()
     return Fernet(base64.urlsafe_b64encode(raw))
+
+
+def _fernet(app):
+    """Audit MF-21 : clé DÉDIÉE (TOTP_ENCRYPTION_KEY) si elle est définie, sinon clé
+    dérivée de FLASK_SECRET_KEY. Les anciennes clés restent lisibles (rotation)."""
+    from cryptography.fernet import Fernet, MultiFernet
+    keys = []
+    dedicated = (os.environ.get("TOTP_ENCRYPTION_KEY") or "").strip()
+    if dedicated:
+        try:
+            keys.append(Fernet(dedicated.encode()))
+        except (ValueError, TypeError):
+            logger.error("TOTP_ENCRYPTION_KEY invalide : elle est ignorée (format Fernet attendu).")
+    keys.append(_legacy_fernet(app.config["SECRET_KEY"]))
+    for old in app.config.get("SECRET_KEY_FALLBACKS") or []:
+        keys.append(_legacy_fernet(old))
+    return MultiFernet(keys)
+
+
+def rotate_totp_secrets(app):
+    """Réchiffre les secrets 2FA avec la clé principale actuelle (au démarrage)."""
+    f = _fernet(app)
+    n = 0
+    for rec in UserTwoFactor.query.all():
+        try:
+            new = f.rotate(rec.secret_enc.encode()).decode("ascii")
+        except Exception:
+            continue                       # illisible : laissé tel quel (reconfiguration manuelle)
+        if new != rec.secret_enc:
+            rec.secret_enc, n = new, n + 1
+    if n:
+        db.session.commit()
+        logger.warning("2FA : %s secret(s) réchiffré(s) avec la clé actuelle.", n)
+    return n
 
 
 def encrypt_secret(app, secret):
@@ -273,6 +307,14 @@ def init_two_factor(app, *, log_audit, limiter=None):
             db.session.rollback()
             logger.exception("Table user_two_factor_emergency indisponible")
 
+    # Audit MF-21 : réchiffrement avec la clé principale (TOTP_ENCRYPTION_KEY si définie).
+    with app.app_context():
+        try:
+            rotate_totp_secrets(app)
+        except Exception:
+            db.session.rollback()
+            logger.exception("Réchiffrement des secrets 2FA impossible")
+
     def audit(action, success=True, details=None, user=None):
         user = user or (current_user if current_user.is_authenticated else None)
         log_audit(action, success=success,
@@ -289,8 +331,13 @@ def init_two_factor(app, *, log_audit, limiter=None):
 
     def _after_verified():
         target = session.pop(NEXT_KEY, None)
-        if target and target.startswith("/") and not target.startswith("//"):
-            return redirect(target)
+        if (isinstance(target, str) and target.startswith("/") and not target.startswith("//")
+                and "\\" not in target and not any(ord(c) < 32 for c in target)):
+            try:                                       # audit MF-26 : une vraie page de MenuFlash
+                app.url_map.bind("localhost").match(target.split("?", 1)[0], method="GET")
+                return redirect(target)
+            except Exception:
+                pass
         return redirect(url_for("super_admin_dashboard"))
 
     # ----------------------------------------------------------------------

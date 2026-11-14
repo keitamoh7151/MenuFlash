@@ -8,7 +8,7 @@
       <h1 class="h5 fw-bold mt-3 mb-2">Maintenance en cours</h1>
       <p class="mb-0">{{ message }}</p>
       {% if current_user.is_authenticated %}
-        <a class="btn btn-link btn-sm mt-3" href="{{ url_for('admin_logout') }}">Se déconnecter</a>
+        <form method="post" action="{{ url_for('admin_logout') }}" class="d-inline m-0"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-link btn-sm mt-3">Se déconnecter</button></form>
       {% endif %}
     </div>
   </div>

@@ -38,6 +38,7 @@ import logging
 import os
 import time
 import traceback
+import re
 from datetime import datetime, timedelta
 
 from flask import (render_template, redirect, url_for, request, flash, abort,
@@ -340,7 +341,7 @@ def init_super_admin(app, *, log_audit, send_password_reset_email, super_admin_r
         try:
             db.session.rollback()
             db.session.add(AppError(
-                path=(request.path or "")[:300],
+                path=re.sub(r"[A-Za-z0-9_\-\.]{24,}", "[jeton]", request.path or "")[:300],   # audit MF-27
                 method=request.method[:10],
                 error_type=type(exception).__name__[:120],
                 message=str(exception)[:500],

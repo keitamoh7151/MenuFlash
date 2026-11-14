@@ -31,7 +31,7 @@
                placeholder="123 456" required autofocus style="letter-spacing: .3em;">
         <button type="submit" class="btn btn-primary w-100 py-2">Confirmer et activer</button>
       </form>
-      <p class="text-center small mt-3 mb-0"><a href="{{ url_for('admin_logout') }}" class="text-secondary">Se déconnecter</a></p>
+      <p class="text-center small mt-3 mb-0"><form method="post" action="{{ url_for('admin_logout') }}" class="d-inline m-0"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-link p-0 align-baseline text-secondary">Se déconnecter</button></form></p>
     </div>
   </div>
 </div>

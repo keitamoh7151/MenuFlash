@@ -25,6 +25,6 @@ jobs:
             --retry 3 --retry-delay 30 --retry-all-errors \
             -H "X-Backup-Token: ${{ secrets.BACKUP_CRON_TOKEN }}" \
             "${{ secrets.APP_URL }}/cron/sauvegarde")
-          echo "$response"
+          echo "$response" | grep -o '"ok":[a-z]*\|"offsite":"[a-z_]*"' || true
           echo "$response" | grep -q '"ok":true'
           echo "$response" | grep -q '"offsite":"ok"' || echo "::warning::Sauvegarde faite, mais la copie hors site n'a pas été envoyée."
