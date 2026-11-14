@@ -113,6 +113,62 @@ class _ForwardedForSanitizer:
         return self.wsgi_app(environ, start_response)
 
 
+class _CanonicalHost:
+    """Audit MF-03 — adresse officielle du site.
+
+    Si APP_BASE_URL est définie (ex. https://menuflash.app), chaque requête est
+    traitée comme adressée à ce domaine : url_for(..., _external=True) produit
+    donc TOUJOURS des liens vers le vrai site (emails, QR codes, redirections),
+    même si un attaquant envoie un en-tête Host falsifié. L'adresse reçue est
+    conservée dans environ["menuflash.received_host"] pour le diagnostic.
+    Le protocole (http/https) n'est pas modifié : la redirection HTTPS continue
+    de fonctionner normalement.
+    """
+
+    def __init__(self, wsgi_app, host):
+        self.wsgi_app = wsgi_app
+        self.host = host
+
+    @staticmethod
+    def parse(raw):
+        """Renvoie le domaine (avec port éventuel) d'APP_BASE_URL, ou None si invalide."""
+        from urllib.parse import urlsplit
+        raw = (raw or "").strip().rstrip("/")
+        if not raw:
+            return None
+        parts = urlsplit(raw)
+        if (parts.scheme not in ("http", "https") or not parts.hostname or parts.path
+                or parts.query or parts.fragment or parts.username or parts.password):
+            return None
+        if any(ch in parts.netloc for ch in " /\\@"):
+            return None
+        return parts.netloc.lower()
+
+    @classmethod
+    def wrap(cls, wsgi_app):
+        raw = os.environ.get("APP_BASE_URL", "")
+        host = cls.parse(raw)
+        if host:
+            log.info("Adresse officielle des liens : %s (APP_BASE_URL).", host)
+            return cls(wsgi_app, host)
+        if raw.strip():
+            log.error("APP_BASE_URL invalide (%r) : attendu par ex. https://menuflash.app, "
+                      "sans chemin ni / final. Elle est ignorée.", raw)
+        elif os.environ.get("RENDER"):
+            log.warning("APP_BASE_URL n'est pas définie : les liens envoyés par email "
+                        "utilisent l'adresse reçue. Définissez-la dans Render > Environment.")
+        return wsgi_app
+
+    def __call__(self, environ, start_response):
+        environ["menuflash.received_host"] = environ.get("HTTP_HOST", "")
+        environ["HTTP_HOST"] = self.host
+        name, _, port = self.host.partition(":")
+        environ["SERVER_NAME"] = name
+        if port:
+            environ["SERVER_PORT"] = port
+        return self.wsgi_app(environ, start_response)
+
+
 def _install_proxy_fix(app):
     raw = os.environ.get("PROXY_HOPS")
     if raw is None:
@@ -122,8 +178,10 @@ def _install_proxy_fix(app):
             hops = max(0, min(int(raw), 5))
         except ValueError:
             hops = 1
-    inner = _ForwardedForSanitizer(app.wsgi_app)
-    app.wsgi_app = ProxyFix(inner, x_for=hops, x_proto=1, x_host=1) if hops else inner
+    inner = _ForwardedForSanitizer(_CanonicalHost.wrap(app.wsgi_app))
+    # Audit MF-03 : x_host=0 — l'en-tête X-Forwarded-Host (modifiable par le
+    # visiteur) ne peut plus changer l'adresse utilisée dans les liens.
+    app.wsgi_app = ProxyFix(inner, x_for=hops, x_proto=1, x_host=0) if hops else inner
     log.info("Adresse IP des visiteurs : %s proxy(s) de confiance.", hops)
 
 
