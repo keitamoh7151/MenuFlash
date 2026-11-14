@@ -1110,32 +1110,8 @@ def table_qrcode_pdf(slug, qr_id):
                       download_name=f"menuflash_{restaurant.slug}_{safe_label}.pdf")
 
 
-@app.route("/m/<slug>/theme-stream")
-def public_theme_stream(slug):
-    restaurant = tenant_or_404(slug)
-    q = realtime.subscribe(restaurant.id)
-
-    def event_stream():
-        try:
-            yield "retry: 3000\n\n"
-            while True:
-                try:
-                    message = q.get(timeout=15)
-                    try:
-                        parsed = json.loads(message)
-                    except Exception:
-                        continue
-                    if parsed.get("type") == "theme_changed":
-                        yield realtime.format_sse(message)
-                except Exception:
-                    yield ": ping\n\n"
-        finally:
-            realtime.unsubscribe(restaurant.id, q)
-
-    return Response(event_stream(), mimetype="text/event-stream", headers={
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-    })
+# Audit MF-02 : l'ancien flux public /m/<slug>/theme-stream (sans fin, sans
+# authentification, utilisé par aucune page) a été supprimé.
 
 
 # --------------------------------------------------------------------------
@@ -1957,33 +1933,21 @@ def admin_orders_counter():
     })
 
 
-@app.route("/admin/commandes/stream")
+@app.route("/admin/commandes/evenements.json")
 @login_required
-def admin_orders_stream():
+def admin_orders_events():
+    """Événements de la cuisine depuis le curseur « depuis » (audit MF-02).
+
+    Remplace l'ancien flux SSE /admin/commandes/stream : une requête courte au lieu
+    d'un thread bloqué. Isolation : uniquement les événements du restaurant actif.
+    """
     restaurant_id = active_restaurant_id()
-    q = realtime.subscribe(restaurant_id)
-
-    def event_stream():
-        import time
-        started = time.time()
-        try:
-            yield "retry: 3000\n\n"
-            # Ferme le flux après 5 minutes : le navigateur se reconnecte
-            # automatiquement, ce qui libère les connexions abandonnées
-            # (onglets fermés, téléphones en veille).
-            while time.time() - started < 300:
-                try:
-                    message = q.get(timeout=15)
-                    yield realtime.format_sse(message)
-                except Exception:
-                    yield ": ping\n\n"
-        finally:
-            realtime.unsubscribe(restaurant_id, q)
-
-    return Response(event_stream(), mimetype="text/event-stream", headers={
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-    })
+    raw = (request.args.get("depuis") or "").strip()
+    since = int(raw) if raw.isdigit() and len(raw) <= 18 else None
+    events, cursor = realtime.events_since(restaurant_id, since)
+    response = jsonify(cursor=cursor, events=events)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/admin/commandes/<int:order_id>/avancer", methods=["POST"])

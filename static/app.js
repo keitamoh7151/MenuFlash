@@ -35,7 +35,8 @@
     return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   }
 
-  function showToast(message, isError) {
+  // link (facultatif) : { href: "/chemin/interne", label: "Voir" } — lien sûr, texte uniquement.
+  function showToast(message, isError, link) {
     var container = document.getElementById("toast-container");
     if (!container || typeof bootstrap === "undefined") return;
     var icon = isError ? "bi-exclamation-circle-fill text-danger" : "bi-check-circle-fill text-success";
@@ -53,6 +54,14 @@
     textEl.textContent = message == null ? "" : String(message);
     body.appendChild(iconEl);
     body.appendChild(textEl);
+    if (link && typeof link.href === "string" && link.href.charAt(0) === "/" &&
+        link.href.charAt(1) !== "/" && link.href.indexOf("\\") === -1) {
+      var linkEl = document.createElement("a");
+      linkEl.href = link.href;
+      linkEl.className = "fw-bold ms-1";
+      linkEl.textContent = link.label || "Voir";
+      body.appendChild(linkEl);
+    }
     var closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "btn-close me-2 m-auto";
@@ -1114,9 +1123,9 @@
           if (lastId !== null && data.latest_id > lastId) {
             playNotificationSound();
             showToast(
-              "🆕 Nouvelle commande · " + escapeHtml(data.latest_table) +
-              ' — <a href="/admin/commandes" class="fw-bold">Voir</a>',
-              false
+              "\uD83C\uDD95 Nouvelle commande · " + (data.latest_table || "") + " —",
+              false,
+              { href: "/admin/commandes", label: "Voir" }
             );
             if (badge) {
               badge.classList.remove("mf-pop");
@@ -1146,75 +1155,91 @@
   }
 
   function initThemeLiveSync() {
-    var el = document.getElementById("theme-sync-root") || document.getElementById("public-theme-sync-root");
-    if (!el || typeof EventSource === "undefined") return;
+    /* Temps réel de la page Commandes (audit MF-02) : requêtes courtes toutes les
+       4 s (10 s en arrière-plan) au lieu d'un flux SSE qui bloquait un thread du
+       serveur. Mêmes sons, mêmes notifications, même indicateur « En direct ». */
+    var el = document.getElementById("theme-sync-root");
+    if (!el || !el.dataset.eventsUrl) return;
 
-    var streamUrl = el.dataset.streamUrl;
-    var isAdminChannel = el.id === "theme-sync-root";
+    var eventsUrl = el.dataset.eventsUrl;
     var liveIndicator = document.getElementById("live-indicator");
-    var reconnectDelay = 2000;
+    var cursor = null;
+    var busy = false;
+    var timer = null;
+    var failures = 0;
 
     function setLiveStatus(isLive) {
       if (!liveIndicator) return;
       liveIndicator.classList.toggle("mf-live-off", !isLive);
-      liveIndicator.innerHTML = isLive
-        ? '<span class="mf-live-dot"></span> En direct'
-        : '<span class="mf-live-dot"></span> Reconnexion…';
+      liveIndicator.textContent = "";
+      var dot = document.createElement("span");
+      dot.className = "mf-live-dot";
+      liveIndicator.appendChild(dot);
+      liveIndicator.appendChild(document.createTextNode(isLive ? " En direct" : " Reconnexion…"));
     }
 
-    function connect() {
-      var source = new EventSource(streamUrl);
-
-      source.onopen = function () {
-        setLiveStatus(true);
-        reconnectDelay = 2000;
-      };
-
-      source.onmessage = function (event) {
-        var payload;
-        try { payload = JSON.parse(event.data); } catch (e) { return; }
-
-        if (payload.type === "theme_changed") {
-          applyThemeVars(payload.data);
-          if (isAdminChannel) showToast("🎨 Le thème a été mis à jour.", false);
-          return;
-        }
-
-        if (!isAdminChannel) return;
-
-        var tableInfo = (payload.data && payload.data.table_label) ? " · " + payload.data.table_label : "";
-
-        if (payload.type === "new_order") {
-          playNotificationSound();
-          showToast("🆕 Nouvelle commande reçue" + tableInfo + " !", false);
-          if (kanbanRefreshFn) kanbanRefreshFn();
-        } else if (payload.type === "order_updated") {
-          playNotificationSound("updated");
-          showToast("✏️ Une commande a été mise à jour" + tableInfo + ".", false);
-          if (kanbanRefreshFn) kanbanRefreshFn();
-        } else if (payload.type === "order_cancelled") {
-          playNotificationSound("cancelled");
-          showToast("🚫 Commande annulée par le client" + tableInfo + ".", false);
-          var orderId = payload.data && payload.data.id;
-          if (orderId && window.MFKanbanRefreshWithCancelAnimation) {
-            window.MFKanbanRefreshWithCancelAnimation(orderId);
-          } else if (kanbanRefreshFn) {
-            kanbanRefreshFn();
-          }
+    function handle(payload) {
+      if (!payload || typeof payload.type !== "string") return;
+      if (payload.type === "theme_changed") {
+        applyThemeVars(payload.data);
+        showToast("\uD83C\uDFA8 Le thème a été mis à jour.", false);
+        return;
+      }
+      var tableInfo = (payload.data && payload.data.table_label) ? " · " + payload.data.table_label : "";
+      if (payload.type === "new_order") {
+        playNotificationSound();
+        showToast("\uD83C\uDD95 Nouvelle commande reçue" + tableInfo + " !", false);
+        if (kanbanRefreshFn) kanbanRefreshFn();
+      } else if (payload.type === "order_updated") {
+        playNotificationSound("updated");
+        showToast("✏️ Une commande a été mise à jour" + tableInfo + ".", false);
+        if (kanbanRefreshFn) kanbanRefreshFn();
+      } else if (payload.type === "order_cancelled") {
+        playNotificationSound("cancelled");
+        showToast("\uD83D\uDEAB Commande annulée par le client" + tableInfo + ".", false);
+        var orderId = payload.data && payload.data.id;
+        if (orderId && window.MFKanbanRefreshWithCancelAnimation) {
+          window.MFKanbanRefreshWithCancelAnimation(orderId);
         } else if (kanbanRefreshFn) {
           kanbanRefreshFn();
         }
-      };
-
-      source.onerror = function () {
-        setLiveStatus(false);
-        source.close();
-        setTimeout(connect, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 1.5, 15000);
-      };
+      } else if (kanbanRefreshFn) {
+        kanbanRefreshFn();
+      }
     }
 
-    connect();
+    function poll() {
+      if (busy) return;
+      busy = true;
+      var url = eventsUrl + (cursor === null ? "" : "?depuis=" + encodeURIComponent(cursor));
+      fetch(url, { cache: "no-store", headers: { "X-Requested-With": "fetch" } })
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function (data) {
+          failures = 0;
+          setLiveStatus(true);
+          var firstCall = cursor === null;
+          if (!firstCall && Array.isArray(data.events)) data.events.forEach(handle);
+          if (typeof data.cursor === "number") cursor = data.cursor;
+        })
+        .catch(function () {
+          failures += 1;
+          if (failures >= 2) setLiveStatus(false);
+        })
+        .then(function () { busy = false; });
+    }
+
+    function schedule() {
+      clearInterval(timer);
+      timer = setInterval(poll, document.hidden ? 10000 : 4000);
+    }
+
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) poll();
+      schedule();
+    });
+
+    poll();
+    schedule();
   }
 
   document.addEventListener("DOMContentLoaded", function () {
