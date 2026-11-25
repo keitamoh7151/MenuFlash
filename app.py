@@ -912,13 +912,13 @@ def open_image_safely(stream, target_side):
     Renvoie l'image chargée, ou None si le fichier est invalide ou trop grand.
     """
     try:
-        probe = Image.open(stream)                    # lit seulement l'en-tête
+        probe = Image.open(stream, formats=["JPEG", "PNG", "WEBP"])                  # lit seulement l'en-tête
         width, height = probe.size
         if width <= 0 or height <= 0 or width * height > MAX_UPLOAD_PIXELS:
             return None
         probe.verify()
         stream.seek(0)
-        img = Image.open(stream)
+        Image.open(stream, formats=["JPEG", "PNG", "WEBP"])
         if img.format == "JPEG":
             img.draft("RGB", (target_side, target_side))   # décodage directement réduit (jamais sous la taille finale)
         elif width * height > MAX_DECODE_PIXELS:
