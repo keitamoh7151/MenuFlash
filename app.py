@@ -918,7 +918,7 @@ def open_image_safely(stream, target_side):
             return None
         probe.verify()
         stream.seek(0)
-        Image.open(stream, formats=["JPEG", "PNG", "WEBP"])
+        img = Image.open(stream, formats=["JPEG", "PNG", "WEBP"])
         if img.format == "JPEG":
             img.draft("RGB", (target_side, target_side))   # décodage directement réduit (jamais sous la taille finale)
         elif width * height > MAX_DECODE_PIXELS:
