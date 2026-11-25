@@ -277,8 +277,8 @@
             <input type="number" name="prep_minutes" id="add-item-prep" class="form-control" value="10" min="1" max="180" inputmode="numeric">
           </div>
           <div class="col-12">
-            <label class="form-label small fw-semibold">Photo <span class="text-secondary fw-normal">(recommandé : les plats avec photo se vendent mieux)</span></label>
-            <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" class="form-control">
+            <label class="form-label small fw-semibold" for="add-item-photo">Photo <span class="text-secondary fw-normal">(recommandé : les plats avec photo se vendent mieux)</span></label>
+            <input type="file" name="photo" id="add-item-photo" accept="image/png,image/jpeg,image/webp" class="form-control">
           </div>
         </div>
       </div>
@@ -340,15 +340,15 @@
             <input type="number" name="prep_minutes" id="edit-item-prep" class="form-control" min="1" max="180">
           </div>
           <div class="col-12">
-            <label class="form-label small fw-semibold">Remplacer la photo (optionnel)</label>
-            <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" class="form-control">
+            <label class="form-label small fw-semibold" for="edit-item-photo">Remplacer la photo (optionnel)</label>
+            <input type="file" name="photo" id="edit-item-photo" accept="image/png,image/jpeg,image/webp" class="form-control" aria-describedby="edit-item-current-photo">
             <div class="small text-secondary mt-1" id="edit-item-current-photo"></div>
           </div>
           <div class="col-12">
             <hr class="my-1">
-            <label class="form-label small fw-semibold">
+            <div class="form-label small fw-semibold">
               <i class="bi bi-tags-fill me-1" style="color: var(--mf-accent-dark);"></i>Suggestions de vente additionnelle
-            </label>
+            </div>
             <p class="small text-secondary mb-2">Ces plats seront proposés au client juste avant l'envoi de sa commande, s'il a choisi celui-ci.</p>
             <div class="mf-suggestion-list" id="edit-item-suggestions-list">
               {% for cat in categories %}
