@@ -103,7 +103,9 @@ a:hover { color: var(--mf-ink); }
   50% { opacity: 0.35; }
 }
 
-* { transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease; }
+a, .btn, .card, .form-control, .form-select {
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease;
+}
 
 .mf-brand-mini { color: var(--mf-accent); margin-left: 3px; }
 
@@ -534,4 +536,12 @@ a:hover { color: var(--mf-ink); }
 @media (max-width: 575.98px) {
   .mf-brand-logo-nav { height: 32px; }
   .mf-brand-plate .mf-brand-logo { height: 54px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }

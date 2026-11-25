@@ -36,46 +36,54 @@
   }
 
   // link (facultatif) : { href: "/chemin/interne", label: "Voir" } — lien sûr, texte uniquement.
-  function showToast(message, isError, link) {
-    var container = document.getElementById("toast-container");
-    if (!container || typeof bootstrap === "undefined") return;
-    var icon = isError ? "bi-exclamation-circle-fill text-danger" : "bi-check-circle-fill text-success";
-    var toastEl = document.createElement("div");
-    toastEl.className = "toast align-items-center border-0 shadow mb-2";
-    toastEl.setAttribute("role", "alert");
-    // Sécurité (audit MF-01) : le message est TOUJOURS inséré comme texte, jamais comme HTML.
-    var row = document.createElement("div");
-    row.className = "d-flex";
-    var body = document.createElement("div");
-    body.className = "toast-body d-flex align-items-center gap-2";
-    var iconEl = document.createElement("i");
-    iconEl.className = "bi " + icon;
-    var textEl = document.createElement("span");
-    textEl.textContent = message == null ? "" : String(message);
-    textEl.style.flex = "1 1 auto";
-    textEl.style.minWidth = "0";
-    body.appendChild(iconEl);
-    body.appendChild(textEl);
-    if (link && typeof link.href === "string" && link.href.charAt(0) === "/" &&
-        link.href.charAt(1) !== "/" && link.href.indexOf("\\") === -1) {
-      var linkEl = document.createElement("a");
-      linkEl.href = link.href;
-      linkEl.className = "btn btn-sm btn-outline-dark fw-bold py-0 px-2 flex-shrink-0 text-nowrap";
-      linkEl.textContent = link.label || "Voir";
-      body.appendChild(linkEl);
-    }
-    var closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "btn-close me-2 m-auto";
-    closeBtn.setAttribute("data-bs-dismiss", "toast");
-    closeBtn.setAttribute("aria-label", "Fermer");
-    row.appendChild(body);
-    row.appendChild(closeBtn);
-    toastEl.appendChild(row);
-    container.appendChild(toastEl);
-    var toast = new bootstrap.Toast(toastEl, { delay: 6000 });
-    toast.show();
+  function showToast(message, isError) {
+  if (typeof bootstrap === "undefined") {
+    console.warn("MenuFlash : Bootstrap indisponible. Message :", message);
+    if (isError) window.alert(message);
+    return;
   }
+  var container = document.getElementById("toast-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "toast-container";
+    container.className = "toast-container position-fixed bottom-0 end-0 p-3";
+    container.style.zIndex = "1100";
+    document.body.appendChild(container);
+  }
+  var icon = isError ? "bi-exclamation-circle-fill text-danger" : "bi-check-circle-fill text-success";
+
+  var toastEl = document.createElement("div");
+  toastEl.className = "toast align-items-center border-0 shadow mb-2";
+  toastEl.setAttribute("role", isError ? "alert" : "status");
+  toastEl.setAttribute("aria-live", isError ? "assertive" : "polite");
+  toastEl.setAttribute("aria-atomic", "true");
+
+  var row = document.createElement("div");
+  row.className = "d-flex";
+  var body = document.createElement("div");
+  body.className = "toast-body d-flex align-items-center gap-2";
+  var i = document.createElement("i");
+  i.className = "bi " + icon;
+  i.setAttribute("aria-hidden", "true");
+  var span = document.createElement("span");
+  span.textContent = message;            // plus d'innerHTML
+  body.appendChild(i);
+  body.appendChild(span);
+
+  var closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "btn-close me-2 m-auto";
+  closeBtn.setAttribute("data-bs-dismiss", "toast");
+  closeBtn.setAttribute("aria-label", "Fermer");
+
+  row.appendChild(body);
+  row.appendChild(closeBtn);
+  toastEl.appendChild(row);
+  container.appendChild(toastEl);
+
+  var toast = new bootstrap.Toast(toastEl, { delay: isError ? 12000 : 6000 });
+  toast.show();
+}
   window.MFShowToast = showToast;
 
   // Sons de l'équipe : voir static/sounds.js (cloche forte et agréable, volume réglable).
@@ -141,6 +149,10 @@
     });
     document.querySelectorAll(".mf-lang-btn").forEach(function (btn) {
       btn.classList.toggle("active", btn.dataset.lang === lang);
+    });
+    document.documentElement.lang = lang;
+    document.querySelectorAll(".mf-lang-btn").forEach(function (b) {
+    b.setAttribute("aria-pressed", String(b.dataset.lang === lang));
     });
   }
 
