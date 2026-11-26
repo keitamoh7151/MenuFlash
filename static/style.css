@@ -560,3 +560,10 @@ a, .btn, .card, .form-control, .form-select {
     --mf-accent-text: color-mix(in srgb, var(--mf-accent-dark) 75%, #000);
   }
 }
+/* FE-01 (suite) : contrastes de l'écran Menu */
+.mf-menu-search .form-control::placeholder { color: #6B6A66; opacity: 1; }
+.mf-meta-warn { color: #6D4509; }
+.mf-menu-tip strong { color: #6D4509; }
+.mf-avail-switch:checked { border-color: var(--mf-accent-text); }
+.mf-avail-form .form-check { display: flex; align-items: center; gap: .5rem; }
+.mf-avail-form .form-check-input { float: none; margin: 0; }
