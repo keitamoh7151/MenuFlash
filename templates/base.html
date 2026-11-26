@@ -24,7 +24,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='phone_field.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='takeaway.css') }}?v=3">
   <link rel="stylesheet" href="{{ url_for('static', filename='theme_mali.css') }}?v=2">
-  {% if request.path.startswith('/m/') %}<link rel="stylesheet" href="{{ url_for('static', filename='theme_mali_client.css') }}?v=1">{% endif %}
+  {% if request.path.startswith('/m/') %}<link rel="stylesheet" href="{{ url_for('static', filename='theme_mali_client.css') }}?v=3">{% endif %}
   <style>
     :root {
       --mf-accent: {{ theme_colors.accent }};
