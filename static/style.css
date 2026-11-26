@@ -225,7 +225,7 @@ a, .btn, .card, .form-control, .form-select {
   background: var(--mf-accent-light); color: var(--mf-accent-dark);
   display: flex; align-items: center; justify-content: center; font-size: 1.6rem;
 }
-.mf-item-price { color: var(--mf-accent-dark); font-weight: 700; }
+.mf-item-price { color: var(--mf-accent-text); font-weight: 700; }
 .mf-item-desc { color: var(--mf-ink-soft); font-size: 0.85rem; }
 
 .mf-prep-chip {
