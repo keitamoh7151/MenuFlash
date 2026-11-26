@@ -166,7 +166,7 @@ a, .btn, .card, .form-control, .form-select {
 .mf-lang-btn:active { transform: scale(0.94); }
 .mf-lang-btn.active {
   background: var(--mf-accent);
-  color: #fff;
+  color: var(--mf-on-accent);
   box-shadow: 0 2px 8px rgba(0,0,0,0.18);
 }
 
@@ -179,7 +179,7 @@ a, .btn, .card, .form-control, .form-select {
 
 .mf-addmode-banner {
   position: sticky; top: 0; z-index: 1026;
-  background: var(--mf-accent); color: #fff;
+  background: var(--mf-accent); color: var(--mf-on-accent);
   padding: 10px 16px; font-size: 0.85rem; font-weight: 600;
 }
 .mf-addmode-banner i { font-size: 1rem; }
@@ -202,7 +202,7 @@ a, .btn, .card, .form-control, .form-select {
   padding: 7px 16px; transition: all 0.15s ease;
 }
 .mf-nav-pills .nav-link.active, .mf-nav-pills .nav-link:hover {
-  background: var(--mf-accent); color: #fff; border-color: var(--mf-accent);
+  background: var(--mf-accent); color: var(--mf-on-accent); border-color: var(--mf-accent);
 }
 
 .mf-category-title {
@@ -453,7 +453,7 @@ a, .btn, .card, .form-control, .form-select {
 
 .mf-kanban-col { background: var(--mf-bg); border-radius: var(--bs-border-radius-lg); min-height: 160px; }
 .mf-kanban-col h2 { font-size: 0.95rem; font-weight: 700; }
-.mf-kanban-count { background: var(--mf-accent); color: #fff; border-radius: 12px; font-size: 0.75rem; padding: 1px 9px; }
+.mf-kanban-count { background: var(--mf-accent); color: var(--mf-on-accent); border-radius: 12px; font-size: 0.75rem; padding: 1px 9px; }
 .mf-order-card-k { border: none; border-radius: var(--bs-border-radius); box-shadow: 0 2px 8px rgba(26,29,35,0.08); }
 .mf-order-card-k .mf-elapsed { font-size: 0.75rem; color: var(--mf-ink-soft); }
 .mf-order-note { background: var(--mf-warning-bg); color: var(--mf-warning); font-size: 0.78rem; border-radius: 6px; padding: 4px 8px; }
@@ -476,7 +476,7 @@ a, .btn, .card, .form-control, .form-select {
 .mf-theme-swatch { height: 64px; background: var(--mf-theme-accent); }
 .mf-theme-check {
   position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border-radius: 50%;
-  background: var(--mf-theme-accent); color: #fff; display: none; align-items: center; justify-content: center;
+  background: var(--mf-theme-accent); color: var(--mf-on-accent); display: none; align-items: center; justify-content: center;
 }
 .mf-theme-card.selected .mf-theme-check { display: flex; }
 
@@ -543,5 +543,20 @@ a, .btn, .card, .form-control, .form-select {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
+  }
+}
+/* FE-01 : texte lisible sur et avec la couleur d'accent du restaurant */
+:root {
+  --mf-on-accent: #fff;
+  --mf-accent-text: var(--mf-accent-dark);
+}
+@supports (color: oklch(from red l c h)) {
+  :root {
+    --mf-on-accent: oklch(from var(--mf-accent, #D98E1F) clamp(0.16, (0.62 - l) * 1000, 1) 0.02 60);
+  }
+}
+@supports (color: color-mix(in srgb, red 50%, black)) {
+  :root {
+    --mf-accent-text: color-mix(in srgb, var(--mf-accent-dark) 75%, #000);
   }
 }

@@ -8,20 +8,18 @@
    boutons en pilule, polices, pied de page avec le logo MenuFlash).
    ========================================================================== */
 
+
 body.mf-client {
   /* La couleur d'accent reste celle du restaurant : on reprend la valeur posée sur <html> par base.html. */
   --mf-accent: inherit;
   --mf-accent-dark: inherit;
   --mf-accent-light: inherit;
   --bs-primary: var(--mf-accent);
-  --bs-link-color: var(--mf-accent-dark);
+  --bs-link-color: var(--mf-accent-text);
   --bs-link-hover-color: var(--mali-umber);
   /* Couleur du texte posé SUR l'accent : blanc par défaut, brun foncé si l'accent est clair (ambre, ocre). */
-  --mf-on-accent: #fff;
 }
-@supports (color: oklch(from red l c h)) {
-  body.mf-client { --mf-on-accent: oklch(from var(--mf-accent) clamp(0.16, (0.7 - l) * 1000, 1) 0.02 60); }
-}
+
 body.mf-client a { color: var(--mf-accent-dark); }
 body.mf-client a:hover { color: var(--mali-umber); }
 
