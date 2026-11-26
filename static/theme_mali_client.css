@@ -188,3 +188,9 @@ body.mf-client .mf-auth-card img[alt] { box-shadow: 0 0 0 3px var(--mali-cream),
   body.mf-client .mf-hero { padding-top: 66px; }
   body.mf-client .mf-hero .mf-logo { width: 86px; height: 86px; }
 }
+
+/* FE-01 : prix du menu client (Lighthouse : mf-pop-price, mf-item-price) */
+body.mf-client .mf-item-price,
+body.mf-client .mf-pop-price {
+  color: var(--mf-accent-text);
+}
