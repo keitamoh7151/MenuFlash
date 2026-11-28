@@ -20,7 +20,7 @@ body.mf-client {
   /* Couleur du texte posé SUR l'accent : blanc par défaut, brun foncé si l'accent est clair (ambre, ocre). */
 }
 
-body.mf-client a { color: var(--mf-accent-dark); }
+body.mf-client a { color: var(--mf-accent-text); }
 body.mf-client a:hover { color: var(--mali-umber); }
 
 /* ---------- Boutons : pilules, couleur du restaurant ---------- */
@@ -108,7 +108,7 @@ body.mf-client .mf-item-card, body.mf-client .mf-resto-info .card {
 body.mf-client .mf-item-card.hover-lift:hover { box-shadow: 0 14px 28px rgba(43,30,21,.12); }
 body.mf-client .mf-item-card h3 { font-family: var(--mali-display); font-weight: 700; letter-spacing: -.01em; color: var(--mali-umber); }
 body.mf-client .mf-item-img, body.mf-client .mf-item-noimg { border-radius: 14px; }
-body.mf-client .mf-item-price { color: var(--mf-accent-dark); font-weight: 800; }
+body.mf-client .mf-item-price { color: var(--mf-accent-text); font-weight: 800; }
 body.mf-client .mf-prep-chip { background: #F6EEDD; color: var(--mali-soft); border-radius: 999px; }
 body.mf-client .mf-rating-chip { border-radius: 999px; }
 body.mf-client .mf-qty-group .btn-outline-secondary { --bs-btn-border-color: #D9C9AA; }
@@ -157,9 +157,9 @@ body.mf-client .mf-order-card { border: 1px solid var(--mali-line); border-radiu
 body.mf-client .mf-status-badge { border-radius: 999px; }
 body.mf-client .mf-progress { height: 12px; background: #EADFC6; }
 body.mf-client .mf-progress .progress-bar { background: var(--mf-accent); border-radius: 999px; }
-body.mf-client .mf-step-labels span.active { color: var(--mf-accent-dark); }
+body.mf-client .mf-step-labels span.active { color: var(--mf-accent-text); }
 body.mf-client .mf-ref-box { background: #F6EEDD; border-radius: 16px; }
-body.mf-client .mf-ref-badge { background: var(--mf-accent-light); color: var(--mf-accent-dark); }
+body.mf-client .mf-ref-badge { background: var(--mf-accent-light); color: var(--mf-accent-text); }
 body.mf-client .mf-ref-code strong { border-color: var(--mf-accent); border-radius: 10px; }
 body.mf-client .mf-star-picker .mf-star-filled { color: var(--mf-accent); }
 
