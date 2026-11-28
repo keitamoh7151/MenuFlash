@@ -37,11 +37,7 @@
 
   // link (facultatif) : { href: "/chemin/interne", label: "Voir" } — lien sûr, texte uniquement.
   function showToast(message, isError) {
-  if (typeof bootstrap === "undefined") {
-    console.warn("MenuFlash : Bootstrap indisponible. Message :", message);
-    if (isError) window.alert(message);
-    return;
-  }
+  
   var container = document.getElementById("toast-container");
   if (!container) {
     container = document.createElement("div");
@@ -81,8 +77,18 @@
   toastEl.appendChild(row);
   container.appendChild(toastEl);
 
-  var toast = new bootstrap.Toast(toastEl, { delay: isError ? 12000 : 6000 });
-  toast.show();
+  var delay = isError ? 12000 : 6000;
+  if (typeof bootstrap !== "undefined" && bootstrap.Toast) {
+    toastEl.addEventListener("hidden.bs.toast", function () { toastEl.remove(); });
+    new bootstrap.Toast(toastEl, { delay: delay }).show();
+  } else {
+    // Repli sans Bootstrap : le message s'affiche quand même
+    console.warn("MenuFlash : Bootstrap indisponible. Message :", message);
+    closeBtn.removeAttribute("data-bs-dismiss");
+    closeBtn.addEventListener("click", function () { toastEl.remove(); });
+    toastEl.classList.add("show");
+    setTimeout(function () { toastEl.remove(); }, delay);
+  }
 }
   window.MFShowToast = showToast;
 
