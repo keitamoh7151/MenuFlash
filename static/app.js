@@ -70,7 +70,7 @@
   closeBtn.type = "button";
   closeBtn.className = "btn-close me-2 m-auto";
   closeBtn.setAttribute("data-bs-dismiss", "toast");
-  closeBtn.setAttribute("aria-label", "Fermer");
+  closeBtn.setAttribute("aria-label", (document.documentElement.lang || "fr").indexOf("en") === 0 ? "Close" : "Fermer");
 
   row.appendChild(body);
   row.appendChild(closeBtn);
@@ -157,6 +157,12 @@
       btn.classList.toggle("active", btn.dataset.lang === lang);
     });
     document.documentElement.lang = lang;
+        document.querySelectorAll(".btn-close").forEach(function (b) {
+      var current = b.getAttribute("aria-label");
+      if (!current || current === "Fermer" || current === "Close") {
+        b.setAttribute("aria-label", lang === "en" ? "Close" : "Fermer");
+      }
+    });
     document.querySelectorAll(".mf-lang-btn").forEach(function (b) {
     b.setAttribute("aria-pressed", String(b.dataset.lang === lang));
     });

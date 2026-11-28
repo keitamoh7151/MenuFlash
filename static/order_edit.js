@@ -161,6 +161,7 @@
     help.setAttribute("data-oe", "help");
     titleBox.appendChild(title); titleBox.appendChild(help);
     var closeX = el("button", "btn-close");
+    closeX.setAttribute("aria-label", (document.documentElement.lang || "fr").indexOf("en") === 0 ? "Close" : "Fermer");
     closeX.type = "button";
     closeX.setAttribute("data-bs-dismiss", "modal");
     head.appendChild(titleBox); head.appendChild(closeX);
